@@ -1,38 +1,21 @@
 :root {
-  --bg: #f2f2f7;
-  --card: #ffffff;
-  --text: #000000;
-  --muted: #8a8a8e;
-  --sep: #d9d9de;
-  --accent: #007aff;
-  --accent-soft: rgba(0, 122, 255, 0.12);
-  --danger: #ff3b30;
-  --success: #34c759;
-  --warning: #ff9500;
-  --fill: #e9e9ee;
-  --inactive: #ececf0;
-  --backdrop: rgba(0, 0, 0, 0.35);
-  --sheet: #f9f9fb;
-  color-scheme: light dark;
-}
-/* Yetizettel: dunkler als Stundenzettel (fast schwarze Karten) und Orange statt Blau, damit man die Apps sofort unterscheidet */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #000000;
-    --card: #0c0c0d;
-    --text: #ffffff;
-    --muted: #7c7c82;
-    --sep: #242427;
-    --accent: #ff9f0a;
-    --accent-soft: rgba(255, 159, 10, 0.18);
-    --danger: #ff453a;
-    --success: #30d158;
-    --warning: #ff9f0a;
-    --fill: #1a1a1c;
-    --inactive: #08080a;
-    --backdrop: rgba(0, 0, 0, 0.55);
-    --sheet: #0e0e10;
-  }
+  /* Yetizettel: immer dunkel und dunkler als Stundenzettel (fast schwarze Karten), Orange statt Blau,
+     Warnungen rot – damit man die Apps sofort unterscheidet */
+  --bg: #000000;
+  --card: #0c0c0d;
+  --text: #ffffff;
+  --muted: #7c7c82;
+  --sep: #242427;
+  --accent: #ff9f0a;
+  --accent-soft: rgba(255, 159, 10, 0.18);
+  --danger: #ff453a;
+  --success: #30d158;
+  --warning: #ff453a;
+  --fill: #1a1a1c;
+  --inactive: #08080a;
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --sheet: #0e0e10;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -279,22 +262,13 @@ input { font: inherit; color: inherit; }
   pointer-events: none;
   z-index: 2;
 }
-.wd-0 { --wd: #007aff; }
-.wd-1 { --wd: #ff9500; }
-.wd-2 { --wd: #00c7be; }
-.wd-3 { --wd: #e8388f; }
-.wd-4 { --wd: #7cc242; }
-.wd-5 { --wd: #7d5cff; }
-.wd-6 { --wd: #8d6e4c; }
-@media (prefers-color-scheme: dark) {
-  .wd-0 { --wd: #0a84ff; }
-  .wd-1 { --wd: #ff9f0a; }
-  .wd-2 { --wd: #40e0d0; }
-  .wd-3 { --wd: #ff4fa3; }
-  .wd-4 { --wd: #9ad04a; }
-  .wd-5 { --wd: #9b7bff; }
-  .wd-6 { --wd: #b08e68; }
-}
+.wd-0 { --wd: #0a84ff; }
+.wd-1 { --wd: #ff9f0a; }
+.wd-2 { --wd: #40e0d0; }
+.wd-3 { --wd: #ff4fa3; }
+.wd-4 { --wd: #9ad04a; }
+.wd-5 { --wd: #9b7bff; }
+.wd-6 { --wd: #b08e68; }
 .day-head {
   display: flex;
   align-items: center;
@@ -974,7 +948,7 @@ button.nav-title { font-size: 17px; }
 .ov-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: #fff; margin-bottom: 6px; }
 .ov-hero .ov-icon { margin: 0; }
 .ov-icon.ot { background: var(--accent); }
-.ov-icon.vac { background: var(--warning); }
+.ov-icon.vac { background: var(--accent); } /* Urlaub orange, Warnfarbe ist hier rot */
 .ov-icon.sick { background: var(--danger); }
 .ov-num { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ov-hero .ov-num { font-size: 30px; }
@@ -999,3 +973,6 @@ button.nav-title { font-size: 17px; }
 .pv-head b { font-size: 17px; }
 .pv-scroll { flex: 1; position: relative; overflow: hidden; touch-action: none; margin-bottom: env(safe-area-inset-bottom); }
 .pv-page { position: absolute; left: 0; top: 0; display: block; max-width: none; background: #fff; border-radius: 6px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); transform-origin: 0 0; will-change: transform; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* Rotes Warndreieck statt Emoji */
+.warn-ico { width: 1.1em; height: 1.1em; vertical-align: -0.15em; }

@@ -369,6 +369,10 @@ function collectWorkBySite() {
 
 const svg = (path, size = 22) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+/** Warndreieck in Rot (Emoji ⚠️ ist immer gelb) */
+const WARN =
+  '<svg class="warn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.27 3.5a2 2 0 0 1 3.46 0l8.47 14.67A2 2 0 0 1 20.47 21H3.53a2 2 0 0 1-1.73-2.83z" fill="var(--danger)"/><rect x="11" y="8" width="2" height="7.2" rx="1" fill="#fff"/><circle cx="12" cy="17.6" r="1.25" fill="#fff"/></svg>';
+
 const ICON = {
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>', 20),
@@ -758,7 +762,7 @@ function listRowHTML(s, hit) {
       <a draggable="false" class="list-row" href="#/zettel/${encodeURIComponent(s.id)}">
         <span class="status ${sent ? 'sent' : 'open'}">${sent ? ICON.check : ''}</span>
         <span class="list-main">
-          <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}${sheetHasWarning(s) ? ' <span class="list-warn">⚠️</span>' : ''}${
+          <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}${sheetHasWarning(s) ? ` <span class="list-warn">${WARN}</span>` : ''}${
             tripsForSheet(s).some((t) => t.dates.length) ? `<button class="list-trip" data-act="open-trip" data-id="${s.id}" aria-label="Reisekostenabrechnung öffnen">${ICON.suitcaseSmall}</button>` : ''
           }</span>
           <span class="list-sub">KW ${isoWeek(parseDate(s.weekStart))} · ${sent ? 'gesendet' : 'offen'}</span>
@@ -820,7 +824,7 @@ function dayBarHTML(s) {
       const total = dayTotal(d);
       const cls = ['db-day', sameDay(sheetDate(s, i), today) ? 'today' : '', d.status ? `status-${d.status} has-status` : ''].join(' ');
       return `<button class="${cls}" data-act="jump" data-day="${i}">
-        <span class="db-name">${WEEKDAYS_SHORT[i]}${dayHasWarning(d) ? '<span class="db-warn">⚠️</span>' : ''}</span>
+        <span class="db-name">${WEEKDAYS_SHORT[i]}${dayHasWarning(d) ? `<span class="db-warn">${WARN}</span>` : ''}</span>
         <span class="db-h">${d.status && !holidayWork(d) ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
       </button>`;
     })
@@ -869,7 +873,7 @@ function dayHTML(s, i) {
   const rowsAndFoot = () => `${day.rows.map((r) => rowHTML(day, r)).join('')}
     <div class="day-foot">
       <button class="link-btn" data-act="addrow">${ICON.plus} Zeile</button>
-      <button class="pill ${day.pause == null ? 'empty' : ''}" data-act="pause">Pause${day.pause == null ? '' : ` ${fmtH(day.pause)}`}${pauseMissing(day) ? ' ⚠️' : ''}</button>
+      <button class="pill ${day.pause == null ? 'empty' : ''}" data-act="pause">Pause${day.pause == null ? '' : ` ${fmtH(day.pause)}`}${pauseMissing(day) ? ` ${WARN}` : ''}</button>
       <span class="day-total">Gesamt <b>${fmtH(dayTotal(day))}</b></span>
     </div>`;
   if (day.status) {
@@ -926,13 +930,13 @@ function rowHTML(day, r) {
       ${timeBtn('start', 'Beginn')}
       <span class="arrow">–</span>
       ${timeBtn('end', 'Ende')}
-      <span class="time-warn ${timeWarning(day, r) ? 'show' : ''}" aria-label="Zeit prüfen">⚠️</span>
+      <span class="time-warn ${timeWarning(day, r) ? 'show' : ''}" aria-label="Zeit prüfen">${WARN}</span>
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><textarea class="txt" data-f="site" rows="1" placeholder="Ort" maxlength="${MAX_LEN.site}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next">${escapeHtml(r.site)}</textarea></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">${WARN}</span><textarea class="txt" data-f="site" rows="1" placeholder="Ort" maxlength="${MAX_LEN.site}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next">${escapeHtml(r.site)}</textarea></div>
     ${typoHintHTML('site', r)}
-    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><textarea class="txt" data-f="work" rows="1" placeholder="Arbeit" maxlength="${MAX_LEN.work}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done">${escapeHtml(r.work)}</textarea></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">${WARN}</span><textarea class="txt" data-f="work" rows="1" placeholder="Arbeit" maxlength="${MAX_LEN.work}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done">${escapeHtml(r.work)}</textarea></div>
     ${typoHintHTML('work', r)}
   </div>`;
 }
@@ -973,7 +977,7 @@ function updateDayWarnings(dayEl, day) {
     }
   }
   const pill = dayEl.querySelector('[data-act="pause"]');
-  if (pill && day.pause == null) pill.textContent = `Pause${pauseMissing(day) ? ' ⚠️' : ''}`;
+  if (pill && day.pause == null) pill.innerHTML = `Pause${pauseMissing(day) ? ` ${WARN}` : ''}`;
   const bar = document.getElementById('daybar');
   if (bar) bar.innerHTML = dayBarHTML(currentSheet());
 }
@@ -1730,10 +1734,10 @@ function tripDayHTML(r) {
         ${timeBtn('start', 'Beginn')}
         <span class="arrow">–</span>
         ${timeBtn('end', 'Ende')}
-        ${r.start == null || r.end == null || tripDayIssues(r).length ? '<span class="time-warn show">⚠️</span>' : ''}
+        ${r.start == null || r.end == null || tripDayIssues(r).length ? `<span class="time-warn show">${WARN}</span>` : ''}
       </div>
       ${tripDayIssues(r)
-        .map((x) => `<p class="trip-issue">⚠️ ${escapeHtml(x)}</p>`)
+        .map((x) => `<p class="trip-issue">${WARN} ${escapeHtml(x)}</p>`)
         .join('')}
       <div class="trip-field"><span class="field-icon">${ICON.pin}</span><textarea class="trip-text" data-t="places" rows="1" maxlength="${TRIP_MAX_LEN}" placeholder="Reiseorte (Baustellen)" autocapitalize="sentences">${escapeHtml(r.places)}</textarea></div>
       <div class="trip-field"><span class="field-icon">${ICON.tool}</span><textarea class="trip-text" data-t="works" rows="1" maxlength="${TRIP_MAX_LEN}" placeholder="Tätigkeiten" autocapitalize="sentences">${escapeHtml(r.works)}</textarea></div>
@@ -2800,7 +2804,7 @@ function typoFor(field, row) {
 const typoHintHTML = (field, row) => {
   const t = typoFor(field, row);
   return t
-    ? `<div class="typo-hint" data-typo="${field}">⚠️ Meintest du <button data-act="typo-fix" data-f="${field}" data-v="${escapeHtml(t.suggestion)}" data-p="${escapeHtml(t.part)}">„${escapeHtml(t.suggestion)}“</button>?<button class="typo-x" data-act="typo-ok" data-f="${field}" aria-label="So lassen">✕</button></div>`
+    ? `<div class="typo-hint" data-typo="${field}">${WARN} Meintest du <button data-act="typo-fix" data-f="${field}" data-v="${escapeHtml(t.suggestion)}" data-p="${escapeHtml(t.part)}">„${escapeHtml(t.suggestion)}“</button>?<button class="typo-x" data-act="typo-ok" data-f="${field}" aria-label="So lassen">✕</button></div>`
     : '';
 };
 /** Hinweis eines Feldes neu setzen (nach dem Verlassen des Feldes); beim Tippen ausblenden */
