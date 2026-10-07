@@ -15,22 +15,23 @@
   --sheet: #f9f9fb;
   color-scheme: light dark;
 }
+/* Yetizettel: dunkler als Stundenzettel (fast schwarze Karten) und Orange statt Blau, damit man die Apps sofort unterscheidet */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #000000;
-    --card: #1c1c1e;
+    --card: #0c0c0d;
     --text: #ffffff;
-    --muted: #8d8d93;
-    --sep: #38383a;
-    --accent: #0a84ff;
-    --accent-soft: rgba(10, 132, 255, 0.22);
+    --muted: #7c7c82;
+    --sep: #242427;
+    --accent: #ff9f0a;
+    --accent-soft: rgba(255, 159, 10, 0.18);
     --danger: #ff453a;
     --success: #30d158;
     --warning: #ff9f0a;
-    --fill: #2c2c2e;
-    --inactive: #141416;
+    --fill: #1a1a1c;
+    --inactive: #08080a;
     --backdrop: rgba(0, 0, 0, 0.55);
-    --sheet: #1c1c1e;
+    --sheet: #0e0e10;
   }
 }
 
