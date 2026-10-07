@@ -976,3 +976,8 @@ button.nav-title { font-size: 17px; }
 
 /* Rotes Warndreieck statt Emoji */
 .warn-ico { width: 1.1em; height: 1.1em; vertical-align: -0.15em; }
+
+/* Lohn: Einheit hinter dem Eingabefeld; Netto als vierte Spalte in der Übersicht */
+.field .unit { flex: none; color: var(--muted); margin-left: -6px; }
+.ov-row.c4 { grid-template-columns: 1fr 84px 66px 86px; gap: 0; padding: 0 12px 0 16px; font-size: 15px; white-space: nowrap; }
+.ov-row.c4.ov-head { font-size: 12px; }

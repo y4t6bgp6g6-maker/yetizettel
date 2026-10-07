@@ -163,6 +163,15 @@ const DEFAULT_SETTINGS = {
   place: '',
   signature: null,
   hiddenSuggestions: { site: [], work: [] },
+  // Lohn (nur auf diesem iPhone): Stundenlohn, feste Zulage, Steuerklasse, Kirchensteuer, Kinder,
+  // Zusatzbeitrag der Krankenkasse, Eigenbeitrag Betriebsrente (Entgeltumwandlung)
+  wage: '',
+  bonus: '',
+  taxClass: '1',
+  church: false,
+  children: '0',
+  kvExtra: '',
+  bav: '',
 };
 
 function readJson(key, fallback) {
@@ -235,6 +244,45 @@ function overtimeAccount(worked = false) {
 }
 
 const yearBalance = (months) => [...months.values()].reduce((a, b) => a + b, 0);
+
+// ───────────────────────── Lohn ─────────────────────────
+
+/** Zahl aus einem Eingabefeld („12,50“), leer = 0 */
+const parseNum = (v) => {
+  const n = parseFloat(String(v ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+const hasWage = () => parseNum(settings.wage) > 0;
+/** Überstunden werden mit 25 % Zuschlag bezahlt */
+const OT_FACTOR = 1.25;
+/** Bezahlte Soll-Stunden eines Monats (Minuten): jeder Werktag Mo–Fr mit 8 Stunden, Feiertage eingeschlossen */
+function monthSollMinutes(year, month) {
+  let days = 0;
+  for (const d = new Date(year, month - 1, 1); d.getMonth() === month - 1; d.setDate(d.getDate() + 1)) {
+    if (d.getDay() >= 1 && d.getDay() <= 5) days++;
+  }
+  return days * Math.round(settings.hoursPerDay * 60);
+}
+/**
+ * Lohn eines Monats: Soll-Stunden × Stundenlohn, Überstunden mit Zuschlag, feste Zulage; Minusstunden mindern
+ * den Grundlohn. Für den laufenden Monat ist das die Prognose (restliche Tage wie Soll). null ohne Stundenlohn.
+ */
+function monthPay(year, month, otMin) {
+  if (!hasWage()) return null;
+  const wage = parseNum(settings.wage);
+  const base = ((monthSollMinutes(year, month) + Math.min(0, otMin)) / 60) * wage;
+  const ot = (Math.max(0, otMin) / 60) * wage * OT_FACTOR;
+  return nettoMonat(base + ot + parseNum(settings.bonus), {
+    klasse: parseNum(settings.taxClass) || 1,
+    kirche: !!settings.church,
+    kinder: parseNum(settings.children),
+    zusatz: parseNum(settings.kvExtra),
+    bav: parseNum(settings.bav),
+  });
+}
+/** „1.234 €“ bzw. mit Cent „1.234,56 €“ */
+const fmtMoney = (v, cents = false) =>
+  `${v.toLocaleString('de-DE', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 })} €`;
 /** „+3,50 h“ / „−2,00 h“ */
 const fmtSigned = (min) => (min > 0 ? '+' : min < 0 ? '−' : '') + fmtH(Math.abs(min));
 
@@ -671,11 +719,16 @@ const fmtDays = (n) => `${fmtNum(n)} ${n === 1 ? 'Tag' : 'Tage'}`;
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
-  const ot = yearBalance(overtimeAccount().get(year) || new Map());
+  const month = new Date().getMonth() + 1;
+  const pay = monthPay(year, month, (overtimeAccount().get(year) || new Map()).get(month) || 0);
   return `<a draggable="false" class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
     <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
-    <span class="stats-item"><span class="stats-num ${balanceClass(ot)}">${hoursHTML(ot)}</span><span class="stats-label">Überstunden</span></span>
+    <span class="stats-item">${
+      pay
+        ? `<span class="stats-num">${fmtMoney(pay.netto)}</span><span class="stats-label">Netto ${MONTHS[month - 1]} (Prognose)</span>`
+        : `<span class="stats-num muted">– €</span><span class="stats-label">Netto: Lohn eintragen</span>`
+    }</span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
 }
@@ -732,26 +785,36 @@ function renderStats() {
     ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
 }
 
-/** Je Monat die gearbeiteten Stunden (Stunden Gesamt) und die Überstunden als Tabelle, neuester Monat oben, darunter die Summe */
+/**
+ * Je Monat die gearbeiteten Stunden (Stunden Gesamt), die Überstunden und – mit Stundenlohn in den Einstellungen –
+ * das geschätzte Netto als Tabelle, neuester Monat oben, darunter die Summe. Laufender Monat: Prognose („≈“).
+ */
 function overtimeYearHTML(year, months) {
   const worked = overtimeAccount(true).get(year) || new Map();
   const total = yearBalance(worked);
   const ot = yearBalance(months);
-  const rows = [...months.keys()]
-    .sort((a, b) => b - a)
+  const keys = [...months.keys()].sort((a, b) => b - a);
+  const withPay = hasWage();
+  const pay = new Map(keys.map((m) => [m, withPay ? monthPay(year, m, months.get(m)) : null]));
+  const now = new Date();
+  const net = (m) => `${year === now.getFullYear() && m === now.getMonth() + 1 ? '≈ ' : ''}${fmtMoney(pay.get(m).netto)}`;
+  const cls = withPay ? 'ov-row c4' : 'ov-row';
+  const rows = keys
     .map((m) => {
       const v = months.get(m);
-      return `<div class="ov-row">
+      return `<div class="${cls}">
         <span>${MONTHS[m - 1]}</span>
         <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
         <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
+        ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
       </div>`;
     })
     .join('');
+  const netSum = keys.reduce((a, m) => a + (pay.get(m) ? pay.get(m).netto : 0), 0);
   return `<div class="card ov-months">
-    <div class="ov-row ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">Überstunden</span></div>
+    <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">${withPay ? 'Überstd.' : 'Überstunden'}</span>${withPay ? '<span class="ov-n">Netto</span>' : ''}</div>
     ${rows}
-    <div class="ov-row ov-sum"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b></div>
+    <div class="${cls} ov-sum"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b>${withPay ? `<b class="ov-n">${fmtMoney(netSum)}</b>` : ''}</div>
   </div>`;
 }
 
@@ -2038,6 +2101,22 @@ function renderSettings() {
       <label class="field"><span>Name</span><input data-s="name" placeholder="Vor- und Nachname" value="${escapeHtml(settings.name)}" autocomplete="name" enterkeyhint="done"></label>
     </div>
     <p class="footnote">Steht auf jedem neuen Stundenzettel.</p>
+
+    <h2 class="section-title">Lohn</h2>
+    <div class="card form">
+      <label class="field"><span>Stundenlohn</span><input data-s="wage" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.wage)}" enterkeyhint="done"><span class="unit">€</span></label>
+      <label class="field"><span>Feste Zulage im Monat</span><input data-s="bonus" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.bonus)}" enterkeyhint="done"><span class="unit">€</span></label>
+      <label class="field"><span>Steuerklasse</span><select data-s="taxClass">${[1, 2, 3, 4, 5, 6]
+        .map((k) => `<option value="${k}" ${String(settings.taxClass) === String(k) ? 'selected' : ''}>${['I', 'II', 'III', 'IV', 'V', 'VI'][k - 1]}</option>`)
+        .join('')}</select></label>
+      <label class="field"><span>Kirchensteuer</span><input type="checkbox" class="toggle" data-s="church" ${settings.church ? 'checked' : ''}></label>
+      <label class="field"><span>Kinder</span><select data-s="children">${[0, 1, 2, 3, 4, 5]
+        .map((k) => `<option value="${k}" ${String(settings.children) === String(k) ? 'selected' : ''}>${k === 5 ? '5 oder mehr' : k}</option>`)
+        .join('')}</select></label>
+      <label class="field"><span>Zusatzbeitrag Krankenkasse</span><input data-s="kvExtra" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.kvExtra)}" enterkeyhint="done"><span class="unit">%</span></label>
+      <label class="field"><span>Betriebsrente (dein Beitrag)</span><input data-s="bav" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.bav)}" enterkeyhint="done"><span class="unit">€</span></label>
+    </div>
+    <p class="footnote">Damit schätzt die Übersicht dein Netto je Monat: Soll-Stunden mal Stundenlohn, Überstunden mit 25 % Zuschlag, dazu die feste Zulage. Dein Beitrag zur Betriebsrente wird vom Brutto abgezogen, der Zuschuss vom Arbeitgeber ändert dein Netto nicht. Die Angaben bleiben auf diesem iPhone.</p>
 
     ${hiddenSuggestionsHTML()}
 
@@ -3380,7 +3459,7 @@ document.addEventListener('input', (e) => {
     searchQuery = t.value;
     refreshListBody();
   } else if (t.dataset.s) {
-    settings[t.dataset.s] = t.value;
+    settings[t.dataset.s] = t.type === 'checkbox' ? t.checked : t.value;
     saveSettings();
   }
 });
