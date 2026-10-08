@@ -271,18 +271,29 @@ function monthSollMinutes(year, month) {
  */
 function monthPay(year, month, otMin) {
   if (!hasWage()) return null;
-  const wage = parseNum(settings.wage);
+  const wage = monthValue(year, month, 'rate', parseNum(settings.wage));
   // Jede Lohnart wie auf der Abrechnung einzeln auf Cent runden (kaufmännisch, ohne Gleitkomma-Fehler)
   const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
   const base = cents(((monthSollMinutes(year, month) + Math.min(0, otMin)) / 60) * wage);
   const ot = cents((Math.max(0, otMin) / 60) * wage * OT_FACTOR);
-  return nettoMonat(base + ot + parseNum(settings.bonus), {
-    klasse: parseNum(settings.taxClass) || 1,
-    kirche: !!settings.church,
-    kinder: parseNum(settings.children),
-    zusatz: parseNum(settings.kvExtra),
-    bav: parseNum(settings.bav),
-  });
+  return nettoMonat(base + ot + parseNum(settings.bonus), lohnOpts(parseNum(settings.bav), year, month));
+}
+/**
+ * Wert eines Monats aus den eingelesenen Lohnabrechnungen (Stundenlohn „rate“, Zusatzbeitrag „kvZusatz“):
+ * die Abrechnung des Monats, sonst die letzte davor; vor der ersten Abrechnung deren Wert. Monate nach der letzten
+ * Abrechnung rechnen mit den Einstellungen (fallback) – so gilt eine Lohnerhöhung ab dort. Der Zusatzbeitrag ändert
+ * sich zum Jahreswechsel, er kommt daher nur aus Abrechnungen desselben Jahres.
+ */
+function monthValue(year, month, key, fallback) {
+  const list = Object.values(payslips)
+    .filter((p) => p && p.year && p.month && p[key] > 0 && (key !== 'kvZusatz' || p.year === year))
+    .sort((a, b) => a.year * 12 + a.month - (b.year * 12 + b.month));
+  if (!list.length) return fallback;
+  const ym = year * 12 + month;
+  const last = list.at(-1);
+  if (ym > last.year * 12 + last.month && key !== 'kvZusatz') return fallback;
+  const before = list.filter((p) => p.year * 12 + p.month <= ym).at(-1);
+  return (before || list[0])[key];
 }
 /** „1.234 €“ bzw. mit Cent „1.234,56 €“ */
 const fmtMoney = (v, cents = false) =>
@@ -307,7 +318,20 @@ const payKey = (year, month) => `${year}-${pad(month)}`;
   Object.values(payslips).forEach((p) => p && p.pay && repairPayslip(p));
   if (JSON.stringify(payslips) !== before) savePayslips();
 }
-const PS_LABELS = { brutto: 'Gesamt-Brutto', steuer: 'Steuern', sv: 'Sozialabgaben', netto: 'Netto-Verdienst', auszahlung: 'Auszahlung' };
+const PS_LABELS = {
+  rate: 'Stundenlohn',
+  zulage: 'Zulagen',
+  brutto: 'Gesamt-Brutto',
+  steuer: 'Steuern',
+  sv: 'Sozialabgaben',
+  netto: 'Netto-Verdienst',
+  auszahlung: 'Auszahlung',
+  'hours.arbeit': 'Arbeitsstunden',
+  'hours.ueber': 'Überstunden',
+  'hours.urlaub': 'Urlaub',
+  'hours.krank': 'Krankheit',
+  'hours.feiertag': 'Feiertage',
+};
 const HOUR_KINDS = [
   ['arbeit', 'Arbeitsstunden'],
   ['ueber', 'Überstunden'],
@@ -316,12 +340,14 @@ const HOUR_KINDS = [
   ['feiertag', 'Feiertage'],
 ];
 const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
-const lohnOpts = (bav) => ({
+/** Angaben für die Netto-Rechnung eines Monats (Steuertarif des Jahres, Zusatzbeitrag wie auf der Abrechnung) */
+const lohnOpts = (bav, year, month, zusatz) => ({
   klasse: parseNum(settings.taxClass) || 1,
   kirche: !!settings.church,
   kinder: parseNum(settings.children),
-  zusatz: parseNum(settings.kvExtra),
+  zusatz: zusatz ?? (year ? monthValue(year, month, 'kvZusatz', parseNum(settings.kvExtra)) : parseNum(settings.kvExtra)),
   bav,
+  year,
 });
 
 /**
@@ -351,12 +377,12 @@ function monthHoursSplit(year, month) {
 
 /** Lohn mit den Stunden der Abrechnung, nach der Rechnung der App (jede Lohnart auf Cent gerundet) */
 function payWithSlipHours(p) {
-  const rate = p.rate || parseNum(settings.wage);
+  const rate = p.rate || monthValue(p.year, p.month, 'rate', parseNum(settings.wage));
   const h = p.hours;
   const brutto =
     cents(h.arbeit * rate) + cents(h.urlaub * rate) + cents(h.feiertag * rate) + cents(h.krank * rate) +
     cents((h.sonst || 0) * rate) + cents(h.ueber * rate * OT_FACTOR) + (p.zulage || 0);
-  return nettoMonat(cents(brutto), lohnOpts(p.bav || 0));
+  return nettoMonat(cents(brutto), lohnOpts(p.bav || 0, p.year, p.month, p.kvZusatz));
 }
 
 /** Vergleich einer Abrechnung mit den Zetteln und der Lohnrechnung der App */
@@ -484,7 +510,7 @@ function renderPayslip(key) {
       <label class="field"><span>Monat</span><select data-ps="month">${MONTHS.map((m, i) => `<option value="${i + 1}" ${p.month === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       ${psField('Jahr', 'year', p.year, '')}
       ${psField('Stundenlohn', 'rate', p.rate, '€')}
-      ${HOUR_KINDS.map(([k, label]) => psField(label, `hours.${k}`, p.hours[k], 'h')).join('')}
+      ${HOUR_KINDS.map(([k, label]) => psField(k === 'krank' ? 'Krankheit (Entgeltfortzahlung)' : label, `hours.${k}`, p.hours[k], 'h')).join('')}
       ${psField('Zulagen', 'zulage', p.zulage, '€')}
       ${psField('Gesamt-Brutto', 'brutto', p.brutto, '€')}
       ${psField('Steuern', 'steuer', p.steuer, '€')}
@@ -493,6 +519,7 @@ function renderPayslip(key) {
       ${psField('Abschlag (bereits erhalten)', 'abschlag', p.abschlag, '€')}
       ${psField('Betriebsrente', 'bav', p.bav, '€')}
       ${psField('Auszahlung', 'auszahlung', p.auszahlung, '€')}
+      ${psField('Zusatzbeitrag Krankenkasse', 'kvZusatz', p.kvZusatz, '%')}
     </div>
     ${(p.fixed || []).length ? `<p class="ps-fixed">Von der App ergänzt, weil auf dem Foto nicht lesbar oder falsch gelesen: ${p.fixed.map((k) => PS_LABELS[k] || k).join(', ')}. Bitte mit der Abrechnung vergleichen.</p>` : ''}
     <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, 'Netto − Abschlag − Betriebsrente = Auszahlung')}</ul>
@@ -540,38 +567,93 @@ async function importPayslip(input) {
   );
   const bar = modal.querySelector('.ps-bar i');
   const step = modal.querySelector('#ps-step');
+  // Bekannte Werte als Gegenprobe: Stundenlöhne, Betriebsrente, Abschlag der letzten Abrechnung
+  const known = Object.values(payslips).filter((x) => x && x.year);
+  const latest = known.sort((a, b) => b.year * 12 + b.month - (a.year * 12 + a.month))[0];
+  const opts = {
+    rates: [...new Set([parseNum(settings.wage), ...known.map((x) => x.rate)].filter((v) => v > 0))],
+    bav: latest ? latest.bav : parseNum(settings.bav),
+    abschlag: latest ? latest.abschlag : 0,
+  };
+  // when: Monat und Jahr, falls von Hand gewählt
+  const parse = (text, when = null) => {
+    const first = Object.assign(parsePayslipText(text, opts), when);
+    if (!first.year) return first;
+    // Steuern und Sozialabgaben zum Vergleich nachrechnen (Tarif des Jahres, Zusatzbeitrag von der Abrechnung)
+    const calc = (brutto, zusatz) => {
+      const n = nettoMonat(brutto, lohnOpts(first.bav, first.year, first.month, zusatz ?? undefined));
+      return { lohnsteuer: n.lohnsteuer, sv: cents(n.kv + n.rv + n.av + n.pv) };
+    };
+    return Object.assign(parsePayslipText(text, { ...opts, calc }), when);
+  };
   try {
-    const text = await recognizePayslip(file, (v) => {
-      bar.style.width = `${Math.round(5 + v * 95)}%`;
+    // Erster Durchgang; bleibt etwas unsicher, liest ein zweiter mit anderer Bildaufbereitung nach
+    // (beide Texte zusammen bestätigen mehr Zahlen)
+    let text = await recognizePayslip(file, 1, (v) => {
+      bar.style.width = `${Math.round(5 + v * 60)}%`;
       step.textContent = `Text wird erkannt: ${Math.round(v * 100)} %`;
     });
-    const p = parsePayslipText(text);
-    if (!p.month) {
-      // Monat nicht erkannt: Vormonat annehmen (Abrechnungen kommen Anfang des Folgemonats)
-      const d = new Date();
-      d.setDate(0);
-      p.month = d.getMonth() + 1;
-      p.year = d.getFullYear();
+    let p = parse(text);
+    const unsure = (x) => !x.year || !x.month || !x.rate || x.brutto == null || x.fixed.some((k) => ['brutto', 'steuer', 'sv', 'netto'].includes(k) || k.startsWith('hours.'));
+    if (unsure(p)) {
+      text += `\n${await recognizePayslip(file, 2, (v) => {
+        bar.style.width = `${Math.round(65 + v * 35)}%`;
+        step.textContent = `Zweiter Durchgang: ${Math.round(v * 100)} %`;
+      })}`;
+      p = parse(text);
     }
     if (!p.rate && !p.brutto && !p.netto) throw new Error('Auf dem Foto wurde keine Lohnabrechnung erkannt.');
+    closeModal(true);
     p.importedAt = Date.now();
-    const key = payKey(p.year, p.month);
-    const store = () => {
-      payslips[key] = p;
-      savePayslips();
-      closeModal(true);
-      location.hash = `#/lohn/${key}`;
-      const chk = payslipChecks(p);
-      toast(chk.brutto && chk.netto && chk.auszahlung ? 'Eingelesen – alle Prüfungen stimmen' : 'Eingelesen – bitte Werte prüfen', 3000);
+    const store = (year, month) => {
+      // Von Hand gewählter Monat: mit dem Tarif dieses Jahres noch einmal gegenprüfen
+      if (p.year !== year || p.month !== month) p = Object.assign(parse(text, { year, month }), { importedAt: p.importedAt });
+      const key = payKey(year, month);
+      const save = () => {
+        payslips[key] = p;
+        savePayslips();
+        location.hash = `#/lohn/${key}`;
+        const chk = payslipChecks(p);
+        toast(chk.brutto && chk.netto && chk.auszahlung && !p.fixed.length ? 'Eingelesen – alle Prüfungen stimmen' : 'Eingelesen – bitte Werte prüfen', 3000);
+      };
+      if (payslips[key]) confirmDialog(`${MONTHS[month - 1]} ${year} ersetzen?`, 'Für diesen Monat gibt es schon eine Lohnabrechnung.', 'Ersetzen', save);
+      else save();
     };
-    if (payslips[key]) {
-      closeModal(true);
-      confirmDialog(`${MONTHS[p.month - 1]} ${p.year} ersetzen?`, 'Für diesen Monat gibt es schon eine Lohnabrechnung.', 'Ersetzen', store);
-    } else store();
+    if (p.year && p.month) store(p.year, p.month);
+    else askPayslipMonth(p.month, store);
   } catch (err) {
     closeModal(true);
     confirmDialog('Einlesen nicht möglich', escapeHtml(err.message || String(err)), 'OK', () => {});
   }
+}
+
+/** Monat der Abrechnung nicht (sicher) erkannt: nachfragen statt raten. month = erkannter Monat oder null */
+function askPayslipMonth(month, done) {
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const m = month || prev.getMonth() + 1;
+  // Jahr: das letzte, in dem dieser Monat schon vorbei ist
+  const y = m <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1;
+  const years = [];
+  for (let k = now.getFullYear(); k >= now.getFullYear() - 5; k--) years.push(k);
+  const modal = openModal(
+    `<div class="alert-body"><b>Für welchen Monat ist die Abrechnung?</b>
+      <div class="alert-msg">${month ? 'Das Jahr war auf dem Foto nicht lesbar.' : 'Monat und Jahr waren auf dem Foto nicht lesbar.'}</div>
+      <div class="ps-when">
+        <select id="ps-m">${MONTHS.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
+        <select id="ps-y">${years.map((k) => `<option ${k === y ? 'selected' : ''}>${k}</option>`).join('')}</select>
+      </div></div>
+    <div class="alert-buttons"><button data-c="no">Abbrechen</button><button data-c="yes" class="strong">Übernehmen</button></div>`,
+    'alert'
+  );
+  modal.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-c]');
+    if (!b) return;
+    const mm = Number(modal.querySelector('#ps-m').value);
+    const yy = Number(modal.querySelector('#ps-y').value);
+    closeModal();
+    if (b.dataset.c === 'yes') done(yy, mm);
+  });
 }
 /** „+3,50 h“ / „−2,00 h“ */
 const fmtSigned = (min) => (min > 0 ? '+' : min < 0 ? '−' : '') + fmtH(Math.abs(min));
@@ -2433,7 +2515,7 @@ function renderSettings() {
       <label class="field"><span>Zusatzbeitrag Krankenkasse</span><input data-s="kvExtra" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.kvExtra)}" enterkeyhint="done"><span class="unit">%</span></label>
       <label class="field"><span>Betriebsrente (dein Beitrag)</span><input data-s="bav" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.bav)}" enterkeyhint="done"><span class="unit">€</span></label>
     </div>
-    <p class="footnote">Damit schätzt die Übersicht dein Netto je Monat: Soll-Stunden mal Stundenlohn, Überstunden mit 25 % Zuschlag, dazu die feste Zulage. Dein Beitrag zur Betriebsrente wird vom Brutto abgezogen, der Zuschuss vom Arbeitgeber ändert dein Netto nicht. Die Angaben bleiben auf diesem iPhone.</p>
+    <p class="footnote">Damit schätzt die Übersicht dein Netto je Monat: Soll-Stunden mal Stundenlohn, Überstunden mit 25 % Zuschlag, dazu die feste Zulage. Dein Beitrag zur Betriebsrente wird vom Brutto abgezogen, der Zuschuss vom Arbeitgeber ändert dein Netto nicht. Bis zur letzten eingelesenen Lohnabrechnung rechnet die App mit Stundenlohn und Zusatzbeitrag der Abrechnungen (z. B. dem niedrigeren Lohn von früher), danach mit den Werten hier. Die Angaben bleiben auf diesem iPhone.</p>
 
     ${hiddenSuggestionsHTML()}
 

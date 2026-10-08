@@ -1015,3 +1015,5 @@ button.nav-title { font-size: 17px; }
 .ov-sub { grid-column: 1 / -1; font-size: 12px; font-weight: 500; white-space: normal; }
 .ov-sub.ok { color: var(--success); }
 .ov-sub.diff { color: var(--warning); }
+.ps-when { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+.ps-when select { font: inherit; font-size: 17px; padding: 8px 10px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); }

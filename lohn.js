@@ -1,7 +1,32 @@
-// Netto-Schätzung für einen Monat: Lohnsteuer nach dem Einkommensteuertarif 2026 (Programmablaufplan, vereinfacht)
-// und Sozialabgaben Arbeitnehmeranteil. Ergebnis ist eine Schätzung, keine Lohnabrechnung.
-// Geprüft an einer echten Abrechnung (Steuerklasse I, kinderlos, ohne Kirchensteuer): Lohnsteuer und
+// Netto-Schätzung für einen Monat: Lohnsteuer nach dem Einkommensteuertarif 2025 bzw. 2026 (Programmablaufplan,
+// vereinfacht) und Sozialabgaben Arbeitnehmeranteil. Ergebnis ist eine Schätzung, keine Lohnabrechnung.
+// Geprüft an echten Abrechnungen 2025 und 2026 (Steuerklasse I, kinderlos, ohne Kirchensteuer): Lohnsteuer und
 // Sozialabgaben stimmen auf den Cent.
+
+const LOHN_2025 = {
+  bbgKv: 5512.5,
+  bbgRv: 8050,
+  kv: 7.3,
+  kvVsp: 7.0,
+  rv: 9.3,
+  av: 1.3,
+  pv: 1.8,
+  pvKinderlos: 0.6,
+  pvAbschlag: 0.25,
+  bavSteuerfrei: 644,
+  bavSvFrei: 322,
+  werbungskosten: 1230,
+  sonderausgaben: 36,
+  entlastung: 4260,
+  entlastungWeitere: 240,
+  soliFreigrenze: 19950,
+  kirche: 9,
+  w1: 13785,
+  w2: 34240,
+  w3: 222260,
+  // Grundtarif: Grenzen und Formeln (§ 32a EStG)
+  tarif: [12096, 17443, 68480, 277825, 932.3, 1015.13, 176.64, 10911.92, 19246.67],
+};
 
 const LOHN_2026 = {
   bbgKv: 5812.5, // Beitragsbemessungsgrenze Kranken-/Pflegeversicherung je Monat
@@ -25,29 +50,33 @@ const LOHN_2026 = {
   w1: 14071,
   w2: 34939,
   w3: 222260,
+  tarif: [12348, 17799, 69878, 277825, 914.51, 1034.87, 173.1, 11135.63, 19470.38],
 };
 
-/** Einkommensteuer nach Grundtarif 2026 (ganze Euro) */
-function tarif2026(zve) {
+/** Werte des Jahres (vor 2025 wie 2025, nach 2026 wie 2026) */
+const lohnJahr = (year) => (year && year <= 2025 ? LOHN_2025 : LOHN_2026);
+
+/** Einkommensteuer nach Grundtarif (ganze Euro) */
+function tarifJahr(zve, c = LOHN_2026) {
+  const [g0, g1, g2, g3, a, b, d, e, f] = c.tarif;
   const x = Math.floor(zve);
-  if (x <= 12348) return 0;
-  if (x <= 17799) {
-    const y = (x - 12348) / 10000;
-    return Math.floor((914.51 * y + 1400) * y);
+  if (x <= g0) return 0;
+  if (x <= g1) {
+    const y = (x - g0) / 10000;
+    return Math.floor((a * y + 1400) * y);
   }
-  if (x <= 69878) {
-    const z = (x - 17799) / 10000;
-    return Math.floor((173.1 * z + 2397) * z + 1034.87);
+  if (x <= g2) {
+    const z = (x - g1) / 10000;
+    return Math.floor((d * z + 2397) * z + b);
   }
-  if (x <= 277825) return Math.floor(0.42 * x - 11135.63);
-  return Math.floor(0.45 * x - 19470.38);
+  if (x <= g3) return Math.floor(0.42 * x - e);
+  return Math.floor(0.45 * x - f);
 }
 
 /** Steuerklasse V und VI: eigene Formel ohne Grundfreibetrag (PAP „MST5-6“) */
-function tarif56(zzx) {
-  const c = LOHN_2026;
+function tarif56(zzx, c = LOHN_2026) {
   const up = (zx) => {
-    const diff = (tarif2026(zx * 1.25) - tarif2026(zx * 0.75)) * 2;
+    const diff = (tarifJahr(zx * 1.25, c) - tarifJahr(zx * 0.75, c)) * 2;
     return Math.max(diff, Math.floor(zx * 0.14));
   };
   if (zzx > c.w2) {
@@ -63,11 +92,11 @@ function tarif56(zzx) {
 /**
  * Netto für einen Monat.
  * brutto: steuer- und beitragspflichtiger Bruttolohn (Grundlohn, Überstunden, Zulagen)
- * opts: { klasse 1–6, kirche, kinder, zusatz (KV-Zusatzbeitrag %), bav (Entgeltumwandlung € je Monat) }
+ * opts: { klasse 1–6, kirche, kinder, zusatz (KV-Zusatzbeitrag %), bav (Entgeltumwandlung € je Monat), year }
  * Ergebnis: { brutto, lohnsteuer, soli, kirchensteuer, kv, rv, av, pv, bav, netto }
  */
 function nettoMonat(brutto, opts) {
-  const c = LOHN_2026;
+  const c = lohnJahr(opts.year);
   const klasse = Number(opts.klasse) || 1;
   const kinder = Math.max(0, Math.floor(Number(opts.kinder) || 0));
   const zusatz = Number(opts.zusatz) || 0;
@@ -97,9 +126,9 @@ function nettoMonat(brutto, opts) {
   if (klasse === 2) frei += c.entlastung + c.entlastungWeitere * Math.max(0, kinder - 1);
   const zve = Math.max(0, Math.floor(jahr - frei));
   let st;
-  if (klasse === 3) st = 2 * tarif2026(Math.floor(zve / 2));
-  else if (klasse === 5 || klasse === 6) st = tarif56(zve);
-  else st = tarif2026(zve);
+  if (klasse === 3) st = 2 * tarifJahr(Math.floor(zve / 2), c);
+  else if (klasse === 5 || klasse === 6) st = tarif56(zve, c);
+  else st = tarifJahr(zve, c);
   const freigrenze = c.soliFreigrenze * (klasse === 3 ? 2 : 1);
   const soliJahr = st > freigrenze ? Math.min(st * 0.055, (st - freigrenze) * 0.119) : 0;
   const lohnsteuer = Math.floor((st / 12) * 100) / 100;
