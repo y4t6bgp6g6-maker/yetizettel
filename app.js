@@ -929,7 +929,10 @@ function listBodyHTML() {
           if (sh.missing && Array.isArray(rows.at(-1))) rows.at(-1).push(sh);
           else rows.push(sh.missing ? [sh] : sh);
         }
-        return `<h2 class="section-title month-head"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span>${searching ? '' : `<span class="month-total">Gesamt ${fmtH(monthTotal)}</span>`}</h2>
+        // Urlaubstage des Monats (Tage aus Teilwochen zählen in ihrem eigenen Monat); keine → nichts anzeigen
+        const vac = list.filter((sh) => !sh.missing).reduce((t, sh) => t + sh.days.filter((d, i) => d.status === 'urlaub' && sheetIsActive(sh, i)).length, 0);
+        const vacHTML = vac ? `<span class="month-vac">${vac} ${vac === 1 ? 'Urlaubstag' : 'Urlaubstage'} · </span>` : '';
+        return `<h2 class="section-title month-head"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span>${searching ? '' : `<span class="month-total">${vacHTML}Gesamt ${fmtH(monthTotal)}</span>`}</h2>
         <div class="card list">${rows.map((r) => (Array.isArray(r) ? gapRowHTML(r) : listRowHTML(r, hits.get(r.id)))).join('')}</div>`;
       })
       .join('');
