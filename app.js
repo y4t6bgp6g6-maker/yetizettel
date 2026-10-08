@@ -299,6 +299,13 @@ function savePayslips() {
   }
 }
 const payKey = (year, month) => `${year}-${pad(month)}`;
+// Früher eingelesene Abrechnungen: falsch gelesene Summen nachträglich aus den übrigen Werten ergänzen
+{
+  const before = JSON.stringify(payslips);
+  Object.values(payslips).forEach((p) => p && p.pay && repairPayslip(p));
+  if (JSON.stringify(payslips) !== before) savePayslips();
+}
+const PS_LABELS = { brutto: 'Gesamt-Brutto', steuer: 'Steuern', sv: 'Sozialabgaben', netto: 'Netto-Verdienst', auszahlung: 'Auszahlung' };
 const HOUR_KINDS = [
   ['arbeit', 'Arbeitsstunden'],
   ['ueber', 'Überstunden'],
@@ -508,6 +515,7 @@ function renderPayslip(key) {
       ${psField('Betriebsrente', 'bav', p.bav, '€')}
       ${psField('Auszahlung', 'auszahlung', p.auszahlung, '€')}
     </div>
+    ${(p.fixed || []).length ? `<p class="ps-fixed">Von der App ergänzt, weil auf dem Foto nicht lesbar oder falsch gelesen: ${p.fixed.map((k) => PS_LABELS[k] || k).join(', ')}. Bitte mit der Abrechnung vergleichen.</p>` : ''}
     <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, 'Netto − Abschlag − Betriebsrente = Auszahlung')}</ul>
     <p class="footnote">Die Werte stammen aus der Texterkennung. Vergleiche sie mit deiner Abrechnung und korrigiere sie bei Bedarf – die Prüfungen oben zeigen, ob alles zusammenpasst.</p>
     <button class="list-btn destructive card ps-delete" data-act="payslip-delete" data-key="${key}">Lohnabrechnung löschen</button>`;
@@ -522,6 +530,8 @@ function updatePayslipField(input) {
   const v = path === 'month' ? Number(input.value) : input.value.trim() === '' ? null : parseNum(input.value);
   if (path.startsWith('hours.')) p.hours[path.slice(6)] = v || 0;
   else p[path] = v;
+  // Von Hand eingetragen: gilt nicht mehr als ergänzt
+  if (p.fixed) p.fixed = p.fixed.filter((k) => k !== path);
   if (path === 'month' || path === 'year') {
     // Anderer Monat: unter dem neuen Schlüssel speichern
     const nk = payKey(p.year, p.month);
@@ -2589,7 +2599,7 @@ function mergeBackup(data) {
     let n = 0;
     for (const [k, p] of Object.entries(data.payslips)) {
       if (!payslips[k] && p && p.year && p.month && p.hours) {
-        payslips[k] = p;
+        payslips[k] = p.pay ? repairPayslip(p) : p;
         n++;
       }
     }

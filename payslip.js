@@ -149,20 +149,45 @@ function parsePayslipText(text) {
   r.abschlag = moneyAfter(lines, /bereits erhalten/, 0) || 0;
   r.bav = moneyAfter(lines, /Altersvorsorge|betr\.\s?AV/i, 0) || 0;
   r.auszahlung = moneyAfter(lines, /Auszahlungsbetrag/);
-  const r2 = (v) => Math.round(v * 100) / 100;
-  // Gesamt-Brutto nicht erkannt: Summe der Lohnarten
-  if (r.brutto == null) {
-    const sum = Object.values(r.pay).reduce((x, y) => x + y, 0) + r.zulage;
-    if (sum > 0) r.brutto = r2(sum);
-  }
-  // Steuern oder Sozialabgaben nicht erkannt: aus Brutto − Netto − der anderen Summe
-  if (r.sv == null && r.brutto != null && r.netto != null && r.steuer != null) r.sv = r2(r.brutto - r.netto - r.steuer);
-  if (r.steuer == null && r.brutto != null && r.netto != null && r.sv != null) r.steuer = r2(r.brutto - r.netto - r.sv);
-  // Auszahlung nicht erkannt: aus Netto, Abschlag und Betriebsrente
-  if (r.auszahlung == null && r.netto != null) r.auszahlung = Math.round((r.netto - r.abschlag - r.bav) * 100) / 100;
-  return r;
+  return repairPayslip(r);
 }
 
+/**
+ * Falsch gelesene oder fehlende Summen aus den übrigen Werten ergänzen. Jede Summe der Abrechnung lässt sich aus
+ * anderen nachrechnen; ein Wert gilt nur, wenn er dazu passt:
+ * - Gesamt-Brutto = Summe der Lohnarten (die Zeilen der Lohnarten sind am zuverlässigsten)
+ * - Netto-Verdienst = Brutto − Steuern − Sozialabgaben = Auszahlung + Abschlag + Betriebsrente
+ * - Auszahlung = Netto − Abschlag − Betriebsrente
+ * Ergänzte Werte stehen in p.fixed (für den Hinweis in der App). Ändert p und gibt es zurück.
+ */
+function repairPayslip(p) {
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const near = (a, b) => a != null && b != null && Math.abs(a - b) < 0.02;
+  const fixed = new Set(p.fixed || []);
+  const set = (key, v) => {
+    if (v == null || !Number.isFinite(v) || near(p[key], v)) return;
+    p[key] = r2(v);
+    fixed.add(key);
+  };
+  const sumPay = r2(Object.values(p.pay || {}).reduce((x, y) => x + y, 0) + (p.zulage || 0));
+  if (sumPay > 0 && !near(p.brutto, sumPay)) set('brutto', sumPay);
+  const fromTax = p.brutto != null && p.steuer != null && p.sv != null ? r2(p.brutto - p.steuer - p.sv) : null;
+  const fromPay = p.auszahlung != null ? r2(p.auszahlung + (p.abschlag || 0) + (p.bav || 0)) : null;
+  // Netto: der Wert, den mindestens zwei Wege bestätigen; sonst die Rechnung über Steuern und Abgaben
+  if (!(near(p.netto, fromTax) || near(p.netto, fromPay))) {
+    if (fromTax != null) set('netto', fromTax);
+    else if (fromPay != null) set('netto', fromPay);
+  }
+  // Steuern oder Sozialabgaben fehlen bzw. passen nicht: aus Brutto − Netto − der anderen Summe
+  if (p.brutto != null && p.netto != null) {
+    if (p.sv == null && p.steuer != null) set('sv', p.brutto - p.netto - p.steuer);
+    if (p.steuer == null && p.sv != null) set('steuer', p.brutto - p.netto - p.sv);
+  }
+  if (p.netto != null && !near(p.auszahlung, p.netto - (p.abschlag || 0) - (p.bav || 0)))
+    set('auszahlung', p.netto - (p.abschlag || 0) - (p.bav || 0));
+  p.fixed = [...fixed];
+  return p;
+}
 /** Plausibilität: Lohnarten ergeben das Gesamt-Brutto, Netto − Abzüge ergibt die Auszahlung */
 function payslipChecks(p) {
   const sumPay = Object.values(p.pay).reduce((a, b) => a + b, 0) + (p.zulage || 0);
