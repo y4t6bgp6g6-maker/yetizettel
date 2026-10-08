@@ -285,6 +285,305 @@ function monthPay(year, month, otMin) {
 /** „1.234 €“ bzw. mit Cent „1.234,56 €“ */
 const fmtMoney = (v, cents = false) =>
   `${v.toLocaleString('de-DE', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 })} €`;
+
+// ───────────────────────── Lohnabrechnungen ─────────────────────────
+// Eingelesene Abrechnungen je Monat („2026-08“ → Werte aus parsePayslipText). Nur Zahlen, kein Foto, keine Namen.
+
+const PAYSLIP_KEY = 'yetizettel.payslips.v1';
+let payslips = readJson(PAYSLIP_KEY, {});
+function savePayslips() {
+  try {
+    localStorage.setItem(PAYSLIP_KEY, JSON.stringify(payslips));
+  } catch {
+    toast('Speichern fehlgeschlagen!');
+  }
+}
+const payKey = (year, month) => `${year}-${pad(month)}`;
+const HOUR_KINDS = [
+  ['arbeit', 'Arbeitsstunden'],
+  ['ueber', 'Überstunden'],
+  ['urlaub', 'Urlaub'],
+  ['krank', 'Krankheit'],
+  ['feiertag', 'Feiertage'],
+];
+const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
+const lohnOpts = (bav) => ({
+  klasse: parseNum(settings.taxClass) || 1,
+  kirche: !!settings.church,
+  kinder: parseNum(settings.children),
+  zusatz: parseNum(settings.kvExtra),
+  bav,
+});
+
+/**
+ * Stunden eines Monats aus den Zetteln, aufgeteilt wie auf der Lohnabrechnung (in Stunden):
+ * Feiertage nach Kalender (Mo–Fr), Urlaub und Krankheit aus den Zetteln, Überstunden wie in der Übersicht,
+ * Arbeitsstunden = Soll − Feiertage − Urlaub − Krankheit (Minusstunden ziehen ab). missing: Werktage ohne Zettel.
+ */
+function monthHoursSplit(year, month) {
+  const byDate = new Map();
+  for (const s of sheets) for (const i of sheetActiveDays(s)) byDate.set(isoDate(sheetDate(s, i)), s.days[i]);
+  const h = { arbeit: 0, ueber: 0, urlaub: 0, krank: 0, feiertag: 0 };
+  const missing = [];
+  const day = settings.hoursPerDay;
+  for (const d = new Date(year, month - 1, 1); d.getMonth() === month - 1; d.setDate(d.getDate() + 1)) {
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    const entry = byDate.get(isoDate(d));
+    if (holidayName(d)) h.feiertag += day;
+    else if (!entry) missing.push(new Date(d));
+    else if (entry.status === 'urlaub') h.urlaub += day;
+    else if (entry.status === 'krank') h.krank += day;
+  }
+  const ot = ((overtimeAccount().get(year) || new Map()).get(month) || 0) / 60;
+  h.ueber = Math.max(0, ot);
+  h.arbeit = monthSollMinutes(year, month) / 60 - h.feiertag - h.urlaub - h.krank + Math.min(0, ot);
+  return { hours: h, missing };
+}
+
+/** Lohn mit den Stunden der Abrechnung, nach der Rechnung der App (jede Lohnart auf Cent gerundet) */
+function payWithSlipHours(p) {
+  const rate = p.rate || parseNum(settings.wage);
+  const h = p.hours;
+  const brutto =
+    cents(h.arbeit * rate) + cents(h.urlaub * rate) + cents(h.feiertag * rate) + cents(h.krank * rate) +
+    cents((h.sonst || 0) * rate) + cents(h.ueber * rate * OT_FACTOR) + (p.zulage || 0);
+  return nettoMonat(cents(brutto), lohnOpts(p.bav || 0));
+}
+
+/** Vergleich einer Abrechnung mit den Zetteln und der Lohnrechnung der App */
+function payslipCompare(p) {
+  const { hours, missing } = monthHoursSplit(p.year, p.month);
+  const hourDiff = Object.fromEntries(HOUR_KINDS.map(([k]) => [k, Math.round((hours[k] - (p.hours[k] || 0)) * 100) / 100]));
+  const otMin = (overtimeAccount().get(p.year) || new Map()).get(p.month) || 0;
+  const app = monthPay(p.year, p.month, otMin);
+  const slipNet = cents((p.netto || 0) - (p.bav || 0)); // Netto inkl. Abschlag, ohne Betriebsrente
+  const withSlip = payWithSlipHours(p);
+  // Bezahlte Grundstunden (ohne Überstunden) gleich, nur anders verbucht – z. B. Urlaub als Stundenlohn abgerechnet
+  const baseDiff = Math.round(['arbeit', 'urlaub', 'krank', 'feiertag'].reduce((a, k) => a + hourDiff[k], 0) * 100) / 100;
+  const shifted = Math.abs(baseDiff) < 0.01 && ['arbeit', 'urlaub', 'krank', 'feiertag'].some((k) => Math.abs(hourDiff[k]) >= 0.01);
+  return {
+    hours,
+    missing,
+    hourDiff,
+    shifted,
+    hoursOk: Math.abs(baseDiff) < 0.01 && Math.abs(hourDiff.ueber) < 0.01,
+    app,
+    slipNet,
+    withSlip,
+    netDiff: app ? cents(app.netto - slipNet) : null,
+    calcDiff: cents(withSlip.netto - slipNet),
+  };
+}
+
+/** „+3,00 h“, „−8,00 h“, „0,00 h“ */
+const fmtHDiff = (h) => (Math.abs(h) < 0.005 ? '0,00 h' : `${h > 0 ? '+' : '−'}${fmtDec(Math.abs(h) * 60)} h`);
+const fmtEuroDiff = (v) => (Math.abs(v) < 0.005 ? '0,00 €' : `${v > 0 ? '+' : '−'}${fmtMoney(Math.abs(v), true)}`);
+
+/** Kurzfassung für die Liste in der Übersicht */
+function payslipSummary(c) {
+  if (c.hoursOk && c.netDiff != null && Math.abs(c.netDiff) < 0.05)
+    return { ok: true, text: c.shifted ? 'Stimmt – Stunden teils anders verbucht' : 'Stunden und Netto stimmen' };
+  const parts = HOUR_KINDS.filter(([k]) => (k === 'ueber' || !c.shifted) && Math.abs(c.hourDiff[k]) >= 0.01).map(([k, label]) => `${label} ${fmtHDiff(c.hourDiff[k])}`);
+  if (c.netDiff != null && Math.abs(c.netDiff) >= 0.05) parts.push(`Netto ${fmtEuroDiff(c.netDiff)}`);
+  return { ok: false, text: parts.join(' · ') };
+}
+
+/** Liste der Abrechnungen eines Jahres für die Übersicht */
+function payslipListHTML(year) {
+  const keys = Object.keys(payslips)
+    .filter((k) => payslips[k].year === year)
+    .sort()
+    .reverse();
+  if (!keys.length) return '';
+  return `<div class="card list ps-list">
+    <div class="ps-head">Lohnabrechnungen</div>
+    ${keys
+      .map((k) => {
+        const p = payslips[k];
+        const s = payslipSummary(payslipCompare(p));
+        return `<a draggable="false" class="list-row ps-item" href="#/lohn/${k}">
+          <span class="ps-dot ${s.ok ? 'ok' : 'diff'}">${s.ok ? ICON.check : '≠'}</span>
+          <span class="list-main"><span class="list-title">${MONTHS[p.month - 1]}</span><span class="list-sub">${escapeHtml(s.text)}</span></span>
+          <span class="list-chevron">${ICON.chevronRight}</span>
+        </a>`;
+      })
+      .join('')}
+  </div>`;
+}
+
+/** Zeile einer Vergleichstabelle: Bezeichnung | Zettel/App | Abrechnung | Unterschied */
+function psRow(label, a, b, diff, bad, cls = '') {
+  return `<div class="ps-row ${cls}"><span>${label}</span><span class="ov-n">${a}</span><span class="ov-n">${b}</span><b class="ov-n ${bad ? 'minus' : diff === '' ? '' : 'ok'}">${diff}</b></div>`;
+}
+
+function payslipCompareHTML(p) {
+  const c = payslipCompare(p);
+  const hRows = HOUR_KINDS.map(([k, label]) => {
+    const d = c.hourDiff[k];
+    const off = Math.abs(d) >= 0.01;
+    // Nur anders verbucht (Summe gleich): orange statt rot
+    return psRow(label, fmtH(c.hours[k] * 60), fmtH((p.hours[k] || 0) * 60), fmtHDiff(d), off && !(c.shifted && k !== 'ueber'), off && c.shifted && k !== 'ueber' ? 'shift' : '');
+  }).join('');
+  const sum = (o) => HOUR_KINDS.reduce((a, [k]) => a + (o[k] || 0), 0);
+  const sumDiff = Math.round((sum(c.hours) - sum(p.hours)) * 100) / 100;
+  const money = (label, appV, slipV) =>
+    appV == null || slipV == null
+      ? psRow(label, appV == null ? '–' : fmtMoney(appV, true), slipV == null ? '–' : fmtMoney(slipV, true), '', false)
+      : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(appV - slipV)), Math.abs(appV - slipV) >= 0.05);
+  const w = c.withSlip;
+  const verdict =
+    Math.abs(c.calcDiff) < 0.05
+      ? `<p class="ps-verdict ok">${ICON.check} Mit den Stunden der Abrechnung kommt die App auf dasselbe Netto${Math.abs(c.calcDiff) >= 0.005 ? ` (${fmtEuroDiff(c.calcDiff)} Rundung)` : ''}.</p>`
+      : `<p class="ps-verdict diff">Auch mit den Stunden der Abrechnung rechnet die App ${fmtEuroDiff(c.calcDiff)} Netto anders – prüfe Stundenlohn, Zulage und die Lohn-Einstellungen.</p>`;
+  const shiftNote = c.shifted
+    ? `<p class="ps-verdict shift">Bezahlt sind gleich viele Stunden, sie sind nur anders verbucht (${HOUR_KINDS.filter(([k]) => k !== 'ueber' && Math.abs(c.hourDiff[k]) >= 0.01)
+        .map(([, label]) => label)
+        .join(' / ')}).</p>`
+    : '';
+  const headline = c.hoursOk
+    ? `<p class="ps-verdict ok">${ICON.check} Die bezahlten Stunden stimmen mit deinen Zetteln überein.</p>${shiftNote}`
+    : `<p class="ps-verdict diff">Die Stunden weichen ab: ${HOUR_KINDS.filter(([k]) => (k === 'ueber' || !c.shifted) && Math.abs(c.hourDiff[k]) >= 0.01)
+        .map(([k, label]) => `${label} ${fmtHDiff(c.hourDiff[k])}`)
+        .join(', ')} laut deinen Zetteln.</p>${shiftNote}`;
+  return `
+    ${headline}
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${hRows}
+      ${psRow('Gesamt', fmtH(sum(c.hours) * 60), fmtH(sum(p.hours) * 60), fmtHDiff(sumDiff), Math.abs(sumDiff) >= 0.01, 'ov-sum')}
+    </div>
+    ${c.missing.length ? `<p class="footnote">Werktage ohne Stundenzettel: ${c.missing.map((d) => fmtShort(d).slice(0, 6)).join(', ')}</p>` : ''}
+    <h2 class="section-title">Lohn</h2>
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Nach deinen Zetteln</span><span class="ov-n">App</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${c.app ? money('Brutto', c.app.brutto, p.brutto) + money('Steuern', c.app.lohnsteuer + c.app.soli + c.app.kirchensteuer, p.steuer) + money('Sozialabgaben', c.app.kv + c.app.rv + c.app.av + c.app.pv, p.sv) + money('Netto', c.app.netto, c.slipNet) : '<div class="ps-row"><span class="muted">Stundenlohn in den Einstellungen eintragen</span></div>'}
+    </div>
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Mit den Stunden der Abrechnung</span><span class="ov-n">App</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${money('Brutto', w.brutto, p.brutto)}
+      ${money('Steuern', w.lohnsteuer + w.soli + w.kirchensteuer, p.steuer)}
+      ${money('Sozialabgaben', w.kv + w.rv + w.av + w.pv, p.sv)}
+      ${money('Netto', w.netto, c.slipNet)}
+    </div>
+    ${verdict}
+    <p class="footnote">Netto heißt hier: alles, was im Monat bei dir ankommt (Abschlag und Auszahlung), ohne den Beitrag zur Betriebsrente.</p>`;
+}
+
+/** Eingabefeld für einen Wert der Abrechnung (Zahl mit Komma) */
+function psField(label, path, value, unit) {
+  const v = value == null ? '' : String(Math.round(value * 100) / 100).replace('.', ',');
+  return `<label class="field"><span>${label}</span><input data-ps="${path}" inputmode="decimal" value="${v}" placeholder="–" enterkeyhint="done"><span class="unit">${unit}</span></label>`;
+}
+
+function renderPayslip(key) {
+  const p = payslips[key];
+  if (!p) {
+    location.replace('#/uebersicht');
+    return;
+  }
+  const chk = payslipChecks(p);
+  const mark = (ok, text) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✕'} ${text}</li>`;
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
+      <span class="nav-title"></span>
+      <span class="nav-btn"></span>
+    </header>
+    <h1 class="large-title">${MONTHS[p.month - 1]} ${p.year}</h1>
+    <p class="ps-sub">Lohnabrechnung im Vergleich</p>
+    <div id="ps-compare">${payslipCompareHTML(p)}</div>
+
+    <h2 class="section-title">Werte der Abrechnung</h2>
+    <div class="card form">
+      <label class="field"><span>Monat</span><select data-ps="month">${MONTHS.map((m, i) => `<option value="${i + 1}" ${p.month === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+      ${psField('Jahr', 'year', p.year, '')}
+      ${psField('Stundenlohn', 'rate', p.rate, '€')}
+      ${HOUR_KINDS.map(([k, label]) => psField(label, `hours.${k}`, p.hours[k], 'h')).join('')}
+      ${psField('Zulagen', 'zulage', p.zulage, '€')}
+      ${psField('Gesamt-Brutto', 'brutto', p.brutto, '€')}
+      ${psField('Steuern', 'steuer', p.steuer, '€')}
+      ${psField('Sozialabgaben', 'sv', p.sv, '€')}
+      ${psField('Netto-Verdienst', 'netto', p.netto, '€')}
+      ${psField('Abschlag (bereits erhalten)', 'abschlag', p.abschlag, '€')}
+      ${psField('Betriebsrente', 'bav', p.bav, '€')}
+      ${psField('Auszahlung', 'auszahlung', p.auszahlung, '€')}
+    </div>
+    <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, 'Netto − Abschlag − Betriebsrente = Auszahlung')}</ul>
+    <p class="footnote">Die Werte stammen aus der Texterkennung. Vergleiche sie mit deiner Abrechnung und korrigiere sie bei Bedarf – die Prüfungen oben zeigen, ob alles zusammenpasst.</p>
+    <button class="list-btn destructive card ps-delete" data-act="payslip-delete" data-key="${key}">Lohnabrechnung löschen</button>`;
+}
+
+/** Wert aus dem Eingabefeld übernehmen und den Vergleich neu zeigen (die Felder selbst bleiben stehen) */
+function updatePayslipField(input) {
+  const key = location.hash.replace('#/lohn/', '');
+  const p = payslips[key];
+  if (!p) return;
+  const path = input.dataset.ps;
+  const v = path === 'month' ? Number(input.value) : input.value.trim() === '' ? null : parseNum(input.value);
+  if (path.startsWith('hours.')) p.hours[path.slice(6)] = v || 0;
+  else p[path] = v;
+  if (path === 'month' || path === 'year') {
+    // Anderer Monat: unter dem neuen Schlüssel speichern
+    const nk = payKey(p.year, p.month);
+    if (nk !== key && p.year > 2000) {
+      delete payslips[key];
+      payslips[nk] = p;
+      savePayslips();
+      location.replace(`#/lohn/${nk}`);
+      return;
+    }
+  }
+  savePayslips();
+  document.getElementById('ps-compare').innerHTML = payslipCompareHTML(p);
+  const chk = payslipChecks(p);
+  const mark = (ok, text) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✕'} ${text}</li>`;
+  document.getElementById('ps-checks').innerHTML = `${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, 'Netto − Abschlag − Betriebsrente = Auszahlung')}`;
+}
+
+/** Foto einer Lohnabrechnung einlesen (Kamera oder Mediathek) */
+async function importPayslip(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const modal = openModal(
+    `<div class="ps-progress"><b>Lohnabrechnung wird gelesen …</b><div class="ps-bar"><i style="width:3%"></i></div><p class="muted" id="ps-step">Texterkennung wird geladen</p></div>`,
+    'alert ps-modal'
+  );
+  const bar = modal.querySelector('.ps-bar i');
+  const step = modal.querySelector('#ps-step');
+  try {
+    const text = await recognizePayslip(file, (v) => {
+      bar.style.width = `${Math.round(5 + v * 95)}%`;
+      step.textContent = `Text wird erkannt: ${Math.round(v * 100)} %`;
+    });
+    const p = parsePayslipText(text);
+    if (!p.month) {
+      // Monat nicht erkannt: Vormonat annehmen (Abrechnungen kommen Anfang des Folgemonats)
+      const d = new Date();
+      d.setDate(0);
+      p.month = d.getMonth() + 1;
+      p.year = d.getFullYear();
+    }
+    if (!p.rate && !p.brutto && !p.netto) throw new Error('Auf dem Foto wurde keine Lohnabrechnung erkannt.');
+    p.importedAt = Date.now();
+    const key = payKey(p.year, p.month);
+    const store = () => {
+      payslips[key] = p;
+      savePayslips();
+      closeModal(true);
+      location.hash = `#/lohn/${key}`;
+      const chk = payslipChecks(p);
+      toast(chk.brutto && chk.netto && chk.auszahlung ? 'Eingelesen – alle Prüfungen stimmen' : 'Eingelesen – bitte Werte prüfen', 3000);
+    };
+    if (payslips[key]) {
+      closeModal(true);
+      confirmDialog(`${MONTHS[p.month - 1]} ${p.year} ersetzen?`, 'Für diesen Monat gibt es schon eine Lohnabrechnung.', 'Ersetzen', store);
+    } else store();
+  } catch (err) {
+    closeModal(true);
+    confirmDialog('Einlesen nicht möglich', escapeHtml(err.message || String(err)), 'OK', () => {});
+  }
+}
 /** „+3,50 h“ / „−2,00 h“ */
 const fmtSigned = (min) => (min > 0 ? '+' : min < 0 ? '−' : '') + fmtH(Math.abs(min));
 
@@ -459,6 +758,7 @@ function route() {
   const hash = location.hash;
   const m = hash.match(/^#\/zettel\/(.+)$/);
   const tm = hash.match(/^#\/reise\/(.+)$/);
+  const lm = hash.match(/^#\/lohn\/(\d{4}-\d{2})$/);
   if (currentView === 'list') listScroll = window.scrollY;
   if (currentView === 'trip') dropEmptyTrip();
   closeModal(true);
@@ -482,6 +782,11 @@ function route() {
   } else if (hash === '#/reisekosten') {
     currentView = 'trips';
     renderTripList();
+    syncNav();
+    window.scrollTo(0, 0);
+  } else if (lm) {
+    currentView = 'payslip';
+    renderPayslip(lm[1]);
     syncNav();
     window.scrollTo(0, 0);
   } else if (hash === '#/uebersicht') {
@@ -780,9 +1085,14 @@ function renderStats() {
             <span class="ov-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span>
           </div>
         </div>
-        ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}`;
+        ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}
+        ${payslipListHTML(y)}`;
       })
       .join('')}
+    <div class="card list ps-import">
+      <label class="list-btn">Lohnabrechnung einlesen …<input type="file" accept="image/*" data-act-change="payslip-import" hidden></label>
+    </div>
+    <p class="footnote">Foto aufnehmen oder aus der Mediathek wählen. Die App liest die Abrechnung und vergleicht sie mit deinen Zetteln. Das Foto bleibt auf dem iPhone und wird nicht gespeichert.</p>
     <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
     ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
 }
@@ -2162,7 +2472,7 @@ function hiddenSuggestionsHTML() {
 }
 
 function exportBackup() {
-  const data = JSON.stringify({ app: 'stundenzettel', version: 1, exportedAt: new Date().toISOString(), sheets, trips, settings }, null, 2);
+  const data = JSON.stringify({ app: 'stundenzettel', version: 1, exportedAt: new Date().toISOString(), sheets, trips, settings, payslips }, null, 2);
   const file = new File([data], `Yetizettel-Sicherung ${isoDate(new Date())}.json`, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file] }).catch((e) => {
@@ -2273,6 +2583,17 @@ function mergeBackup(data) {
       else tripsSame++;
     }
     saveTrips();
+  }
+  // Lohnabrechnungen: fehlende Monate übernehmen, vorhandene bleiben
+  if (data.payslips && typeof data.payslips === 'object') {
+    let n = 0;
+    for (const [k, p] of Object.entries(data.payslips)) {
+      if (!payslips[k] && p && p.year && p.month && p.hours) {
+        payslips[k] = p;
+        n++;
+      }
+    }
+    if (n) savePayslips();
   }
   return { added, same, conflicts, signature, renamed, tripsAdded, tripsSame, settingsRestored };
 }
@@ -3337,6 +3658,17 @@ document.addEventListener('click', (e) => {
     case 'backup-export':
       exportBackup();
       break;
+    case 'payslip-delete': {
+      const key = el.dataset.key;
+      const p = payslips[key];
+      if (!p) break;
+      confirmDialog(`Lohnabrechnung ${MONTHS[p.month - 1]} ${p.year} löschen?`, 'Die eingelesenen Werte gehen verloren.', 'Löschen', () => {
+        delete payslips[key];
+        savePayslips();
+        location.replace('#/uebersicht');
+      }, true);
+      break;
+    }
     case 'open-trip': {
       e.preventDefault(); // nicht den Stundenzettel öffnen (Knopf liegt in dessen Zeile)
       const s = findSheet(el.dataset.id);
@@ -3416,6 +3748,10 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.dataset.ps && t.dataset.ps !== 'month' && t.dataset.ps !== 'year') {
+    updatePayslipField(t);
+    return;
+  }
   if (t.dataset.f) {
     const s = currentSheet();
     if (!s) return;
@@ -3468,6 +3804,8 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.dataset.actChange === 'backup-import') importBackup(e.target);
+  else if (e.target.dataset.actChange === 'payslip-import') importPayslip(e.target);
+  else if (e.target.dataset.ps === 'month' || e.target.dataset.ps === 'year') updatePayslipField(e.target);
   else if (e.target.dataset.s === 'name') renameAll(e.target.value);
 });
 

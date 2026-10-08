@@ -979,5 +979,32 @@ button.nav-title { font-size: 17px; }
 
 /* Lohn: Einheit hinter dem Eingabefeld; Netto als vierte Spalte in der Übersicht */
 .field .unit { flex: none; color: var(--muted); margin-left: -6px; }
-.ov-row.c4 { grid-template-columns: 1fr 84px 66px 86px; gap: 0; padding: 0 12px 0 16px; font-size: 15px; white-space: nowrap; }
+.ov-row.c4 { grid-template-columns: minmax(0, 1fr) 76px 66px 80px; column-gap: 6px; padding: 0 12px 0 16px; font-size: 14px; white-space: nowrap; }
 .ov-row.c4.ov-head { font-size: 12px; }
+
+/* Lohnabrechnungen */
+.ps-list, .ps-import { margin-top: 10px; }
+.ps-head { padding: 12px 16px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.ps-item { gap: 12px; }
+.ps-dot { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 700; font-size: 15px; color: #fff; }
+.ps-dot svg { width: 14px; height: 14px; }
+.ps-dot.ok { background: var(--success); }
+.ps-dot.diff { background: var(--danger); }
+.ps-sub { margin: -8px 4px 14px; color: var(--muted); }
+.ps-table { margin-top: 10px; }
+.ps-row { display: grid; grid-template-columns: 1fr 76px 84px 78px; align-items: center; min-height: 40px; padding: 0 12px 0 14px; border-top: 0.5px solid var(--sep); font-size: 14px; white-space: nowrap; }
+.ps-row.ov-head { min-height: 32px; border-top: 0; font-size: 11px; white-space: normal; }
+.ps-row b.ok { color: var(--muted); font-weight: 500; }
+.ps-verdict { display: flex; gap: 8px; align-items: flex-start; margin: 12px 4px; font-size: 15px; line-height: 1.35; }
+.ps-verdict svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.ps-verdict.ok { color: var(--success); }
+.ps-verdict.diff { color: var(--danger); }
+.ps-verdict.shift { color: var(--accent); }
+.ps-row.shift b { color: var(--accent); }
+.ps-checks { list-style: none; margin: 10px 4px 0; padding: 0; font-size: 14px; line-height: 1.6; }
+.ps-checks .ok { color: var(--success); }
+.ps-checks .bad { color: var(--danger); }
+.ps-delete { margin-top: 18px; width: 100%; }
+.ps-progress { padding: 22px 20px; text-align: center; }
+.ps-bar { height: 8px; margin: 16px 0 10px; border-radius: 4px; background: var(--fill); overflow: hidden; }
+.ps-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
