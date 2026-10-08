@@ -218,8 +218,9 @@ function absenceStats() {
 }
 
 /**
- * Überstunden-Konto je Monat: Ist − Soll, Tag für Tag – nur Tage, für die es einen Stundenzettel gibt.
- * Wochen ohne Zettel kommen in der Rechnung nicht vor.
+ * Überstunden-Konto je Monat: Ist − Soll, Tag für Tag – nur Tage, an denen schon etwas eingetragen ist: mindestens
+ * eine Zeile mit Anfangs- und Enduhrzeit oder Urlaub/Krank/Feiertag/Frei. Leere Tage (auch heute, solange noch nichts
+ * eingetragen ist) und Wochen ohne Zettel kommen in der Rechnung nicht vor.
  * Soll: jeder Werktag Mo–Fr mit Wochen-Soll ÷ 5; Tage nach heute zählen noch nicht.
  * Ist: „Stunden Gesamt“ des Tages (inkl. gutgeschriebener Stunden für Urlaub, Krankheit, Feiertag).
  * Ergebnis: Map Jahr → Map Monat (1–12) → Saldo in Minuten; mit `worked` stattdessen das Ist (Stunden Gesamt)
@@ -232,6 +233,7 @@ function overtimeAccount(worked = false) {
     s.days.forEach((d, i) => {
       const date = sheetDate(s, i);
       if (!sheetIsActive(s, i) || date > today) return;
+      if (!d.status && !d.rows.some((r) => r.start != null && r.end != null)) return;
       const soll = i < 5 ? dailySoll : 0;
       const y = date.getFullYear();
       const m = date.getMonth() + 1;
@@ -1100,7 +1102,7 @@ function renderStats() {
     </div>
     <p class="footnote">Foto aufnehmen oder aus der Mediathek wählen. Die App liest die Abrechnung und vergleicht sie mit deinen Zetteln. Das Foto bleibt auf dem iPhone und wird nicht gespeichert.</p>
     <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
-    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
+    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Es zählen nur Tage mit Anfangs- und Enduhrzeit oder mit Urlaub, Krank, Feiertag oder Frei. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
 }
 
 /**
