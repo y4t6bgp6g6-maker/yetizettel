@@ -1011,9 +1011,17 @@ button.nav-title { font-size: 17px; }
 .ov-m { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ps-dot.sm { width: 18px; height: 18px; font-size: 11px; }
 .ps-dot.sm svg { width: 11px; height: 11px; }
-.ov-slip { color: inherit; text-decoration: none; padding-top: 10px; padding-bottom: 10px; row-gap: 3px; }
-.ov-sub { grid-column: 1 / -1; font-size: 12px; font-weight: 500; white-space: normal; }
-.ov-sub.ok { color: var(--success); }
-.ov-sub.diff { color: var(--warning); }
+/* Monat mit Abrechnung: zweite Zeile mit den Unterschieden */
+.ov-month { display: block; color: inherit; text-decoration: none; border-top: 0.5px solid var(--sep); }
+.ov-month .ov-row { border-top: 0; }
+.ov-month > .ov-row:first-child .ov-m { padding-left: 24px; }
+.ov-month:has(.ov-slip) > .ov-row:first-child { min-height: 36px; padding-top: 6px; }
+.ov-row.ov-slip { min-height: 30px; padding-bottom: 6px; font-size: 13px; color: var(--muted); }
+.ov-pill { font-style: normal; font-weight: 600; font-size: 12px; padding: 2px 7px; border-radius: 9px; color: var(--muted); }
+.ov-pill.neg { color: var(--warning); background: rgba(255, 159, 10, 0.16); }
+.ov-pill.pos { color: var(--success); background: rgba(48, 209, 88, 0.16); }
+.ov-total { border-top: 0.5px solid var(--sep); }
+.ov-sum.ov-slip { border-top: 0; font-weight: 600; }
+.ov-slip-note { margin: 0; padding: 4px 16px 12px; font-size: 13px; color: var(--muted); background: var(--fill); }
 .ps-when { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 .ps-when select { font: inherit; font-size: 17px; padding: 8px 10px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); }

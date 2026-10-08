@@ -447,7 +447,7 @@ function repairPayslip(p) {
 }
 /** Plausibilität: Lohnarten ergeben das Gesamt-Brutto, Netto − Abzüge ergibt die Auszahlung */
 function payslipChecks(p) {
-  const sumPay = Object.values(p.pay).reduce((a, b) => a + b, 0) + (p.zulage || 0);
+  const sumPay = Object.values(p.pay || {}).reduce((a, b) => a + b, 0) + (p.zulage || 0);
   const near = (a, b) => a != null && b != null && Math.abs(a - b) < 0.02;
   return {
     brutto: near(Math.round(sumPay * 100) / 100, p.brutto),

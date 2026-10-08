@@ -388,7 +388,8 @@ function payWithSlipHours(p) {
 /** Vergleich einer Abrechnung mit den Zetteln und der Lohnrechnung der App */
 function payslipCompare(p) {
   const { hours, missing } = monthHoursSplit(p.year, p.month);
-  const hourDiff = Object.fromEntries(HOUR_KINDS.map(([k]) => [k, Math.round((hours[k] - (p.hours[k] || 0)) * 100) / 100]));
+  // Unterschiede immer aus Sicht der Abrechnung: −3 h = auf der Abrechnung 3 Stunden weniger als auf den Zetteln
+  const hourDiff = Object.fromEntries(HOUR_KINDS.map(([k]) => [k, Math.round(((p.hours[k] || 0) - hours[k]) * 100) / 100]));
   const otMin = (overtimeAccount().get(p.year) || new Map()).get(p.month) || 0;
   const app = monthPay(p.year, p.month, otMin);
   const slipNet = cents((p.netto || 0) - (p.bav || 0)); // Netto inkl. Abschlag, ohne Betriebsrente
@@ -405,7 +406,7 @@ function payslipCompare(p) {
     app,
     slipNet,
     withSlip,
-    netDiff: app ? cents(app.netto - slipNet) : null,
+    netDiff: app ? cents(slipNet - app.netto) : null,
     calcDiff: cents(withSlip.netto - slipNet),
   };
 }
@@ -437,11 +438,11 @@ function payslipCompareHTML(p) {
     return psRow(label, fmtH(c.hours[k] * 60), fmtH((p.hours[k] || 0) * 60), fmtHDiff(d), off && !(c.shifted && k !== 'ueber'), off && c.shifted && k !== 'ueber' ? 'shift' : '');
   }).join('');
   const sum = (o) => HOUR_KINDS.reduce((a, [k]) => a + (o[k] || 0), 0);
-  const sumDiff = Math.round((sum(c.hours) - sum(p.hours)) * 100) / 100;
+  const sumDiff = Math.round((sum(p.hours) - sum(c.hours)) * 100) / 100;
   const money = (label, appV, slipV) =>
     appV == null || slipV == null
       ? psRow(label, appV == null ? '–' : fmtMoney(appV, true), slipV == null ? '–' : fmtMoney(slipV, true), '', false)
-      : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(appV - slipV)), Math.abs(appV - slipV) >= 0.05);
+      : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(slipV - appV)), Math.abs(appV - slipV) >= 0.05);
   const w = c.withSlip;
   const verdict =
     Math.abs(c.calcDiff) < 0.05
@@ -454,9 +455,9 @@ function payslipCompareHTML(p) {
     : '';
   const headline = c.hoursOk
     ? `<p class="ps-verdict ok">${ICON.check} Die bezahlten Stunden stimmen mit deinen Zetteln überein.</p>${shiftNote}`
-    : `<p class="ps-verdict diff">Die Stunden weichen ab: ${HOUR_KINDS.filter(([k]) => (k === 'ueber' || !c.shifted) && Math.abs(c.hourDiff[k]) >= 0.01)
+    : `<p class="ps-verdict diff">Auf der Abrechnung gegenüber deinen Zetteln: ${HOUR_KINDS.filter(([k]) => (k === 'ueber' || !c.shifted) && Math.abs(c.hourDiff[k]) >= 0.01)
         .map(([k, label]) => `${label} ${fmtHDiff(c.hourDiff[k])}`)
-        .join(', ')} laut deinen Zetteln.</p>${shiftNote}`;
+        .join(', ')}.</p>${shiftNote}`;
   return `
     ${headline}
     <div class="card ps-table">
@@ -821,7 +822,22 @@ let currentView = '';
 /** Suchbegriff in der Liste; null = Suche geschlossen */
 let searchQuery = null;
 
+let routedHash = null;
 function route() {
+  routedHash = location.hash;
+  if (backTarget) {
+    const here = location.hash || '#/';
+    if (here !== backTarget && history.state !== 'root') {
+      history.back();
+      return;
+    }
+    const target = backTarget;
+    backTarget = null;
+    if (here !== target) {
+      location.replace(target);
+      return;
+    }
+  }
   const hash = location.hash;
   const m = hash.match(/^#\/zettel\/(.+)$/);
   const tm = hash.match(/^#\/reise\/(.+)$/);
@@ -870,10 +886,25 @@ function route() {
   updateTopButton();
 }
 window.addEventListener('hashchange', route);
+// Zurück auf einen Eintrag mit derselben Adresse (doppelte Seite) löst kein hashchange aus
+window.addEventListener('popstate', () => backTarget && location.hash === routedHash && route());
 
+/**
+ * Zurück führt immer eine feste Ebene höher (Abrechnung → Übersicht → Stundenzettel), auch wenn sich im Verlauf
+ * doppelte Seiten angesammelt haben (z. B. nach dem Löschen einer Abrechnung oder mehrmaligem Einlesen): route()
+ * geht dann weiter zurück, bis die Zielseite erreicht ist. Andere Seiten (Reisekostenabrechnung) wie der Verlauf.
+ */
+const BACK_TARGETS = [
+  [/^#\/lohn\//, '#/uebersicht'],
+  [/^#\/(uebersicht|einstellungen|reisekosten|zettel\/.+)$/, '#/'],
+];
+let backTarget = null;
 function goBack() {
-  if (history.length > 1 && history.state !== 'root') history.back();
-  else location.hash = '#/';
+  const t = BACK_TARGETS.find(([re]) => re.test(location.hash));
+  if (history.length > 1 && history.state !== 'root') {
+    backTarget = t ? t[1] : null;
+    history.back();
+  } else location.hash = t ? t[1] : '#/';
 }
 
 // ───────────────────────── Liste ─────────────────────────
@@ -1179,8 +1210,9 @@ function renderStats() {
 /**
  * Je Monat die gearbeiteten Stunden (Stunden Gesamt), die Überstunden und – mit Stundenlohn in den Einstellungen –
  * das geschätzte Netto als Tabelle, neuester Monat oben, darunter die Summe. Laufender Monat: Prognose („≈“).
- * Monate mit eingelesener Lohnabrechnung: Haken bzw. ≠ vor dem Monat, Kurzfassung des Vergleichs darunter;
- * Antippen öffnet den Vergleich.
+ * Monate mit eingelesener Lohnabrechnung bekommen eine zweite Zeile mit den Unterschieden der Abrechnung gegenüber
+ * den Zetteln (Stunden, Überstunden, Netto; −3 h = auf der Abrechnung 3 Stunden weniger) und öffnen beim Antippen
+ * den Vergleich. Unter der Summe: die Unterschiede aller Abrechnungen des Jahres.
  */
 function overtimeYearHTML(year, months) {
   const worked = overtimeAccount(true).get(year) || new Map();
@@ -1194,26 +1226,53 @@ function overtimeYearHTML(year, months) {
   const now = new Date();
   const net = (m) => (pay.get(m) ? `${year === now.getFullYear() && m === now.getMonth() + 1 ? '≈ ' : ''}${fmtMoney(pay.get(m).netto)}` : '–');
   const cls = withPay ? 'ov-row c4' : 'ov-row';
+  const pill = (v, text) => `<span class="ov-n"><i class="ov-pill ${Math.abs(v) < 0.005 ? '' : v < 0 ? 'neg' : 'pos'}">${text}</i></span>`;
+  const hDiff = (h) => (Math.abs(h) < 0.005 ? '±0 h' : `${h > 0 ? '+' : '−'}${fmtDec(Math.abs(h) * 60)} h`);
+  const eDiff = (v) => (Math.abs(v) < 0.5 ? '±0 €' : `${v > 0 ? '+' : '−'}${fmtMoney(Math.abs(v))}`);
+  let sumOt = 0;
+  let sumNet = 0;
   const rows = keys
     .map((m) => {
       const v = months.get(m) || 0;
       const slip = payslips[payKey(year, m)];
-      const sum = slip && payslipSummary(payslipCompare(slip));
-      const tag = slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div';
-      return `<${tag} class="${cls}${slip ? ' ov-slip' : ''}">
-        <span class="ov-m">${sum ? `<span class="ps-dot sm ${sum.ok ? 'ok' : 'diff'}">${sum.ok ? ICON.check : '≠'}</span>` : '<span class="ps-dot sm"></span>'}${MONTHS[m - 1]}</span>
-        <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
-        <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
-        ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
-        ${sum ? `<span class="ov-sub ${sum.ok ? 'ok' : 'diff'}">Abrechnung: ${escapeHtml(sum.text)} ›</span>` : ''}
+      let second = '';
+      if (slip) {
+        const c = payslipCompare(slip);
+        const ok = payslipSummary(c).ok;
+        const hours = HOUR_KINDS.reduce((a, [k]) => a + (slip.hours[k] || 0) - (c.hours[k] || 0), 0);
+        sumOt += c.hourDiff.ueber;
+        if (c.netDiff != null) sumNet += c.netDiff;
+        second = `<div class="${cls} ov-slip">
+          <span class="ov-m"><span class="ps-dot sm ${ok ? 'ok' : 'diff'}">${ok ? ICON.check : '≠'}</span>Abrechnung</span>
+          ${pill(hours, hDiff(hours))}${pill(c.hourDiff.ueber, hDiff(c.hourDiff.ueber))}${withPay ? pill(c.netDiff || 0, c.netDiff == null ? '–' : eDiff(c.netDiff)) : ''}
+        </div>`;
+      }
+      return `<${slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div'} class="ov-month">
+        <div class="${cls}">
+          <span class="ov-m">${MONTHS[m - 1]}</span>
+          <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
+          <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
+          ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
+        </div>
+        ${second}
       </${slip ? 'a' : 'div'}>`;
     })
     .join('');
   const netSum = keys.reduce((a, m) => a + (pay.get(m) ? pay.get(m).netto : 0), 0);
+  const n = slips.length;
+  const slipSum = n
+    ? `<div class="${cls} ov-sum ov-slip"><span class="ov-m">Abrechnungen</span><span class="ov-n"></span>${pill(sumOt, hDiff(sumOt))}${withPay ? pill(sumNet, eDiff(sumNet)) : ''}</div>
+      <p class="ov-slip-note">${
+        sumOt < -0.005
+          ? `Auf ${n === 1 ? 'der Abrechnung fehlen' : `${n} Abrechnungen fehlen`} ${fmtDec(Math.abs(sumOt) * 60)} Überstunden${withPay && sumNet < -0.5 ? ` – dadurch ${fmtMoney(Math.abs(sumNet))} weniger Netto` : ''}.`
+          : `Auf ${n === 1 ? 'der Abrechnung fehlen' : `den ${n} Abrechnungen fehlen`} keine Überstunden.`
+      }</p>`
+    : '';
   return `<div class="card ov-months">
     <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">${withPay ? 'Überstd.' : 'Überstunden'}</span>${withPay ? '<span class="ov-n">Netto</span>' : ''}</div>
     ${rows}
-    <div class="${cls} ov-sum"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b>${withPay ? `<b class="ov-n">${fmtMoney(netSum)}</b>` : ''}</div>
+    <div class="${cls} ov-sum ov-total"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b>${withPay ? `<b class="ov-n">${fmtMoney(netSum)}</b>` : ''}</div>
+    ${slipSum}
   </div>`;
 }
 
