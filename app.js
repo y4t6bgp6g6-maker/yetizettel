@@ -270,8 +270,10 @@ function monthSollMinutes(year, month) {
 function monthPay(year, month, otMin) {
   if (!hasWage()) return null;
   const wage = parseNum(settings.wage);
-  const base = ((monthSollMinutes(year, month) + Math.min(0, otMin)) / 60) * wage;
-  const ot = (Math.max(0, otMin) / 60) * wage * OT_FACTOR;
+  // Jede Lohnart wie auf der Abrechnung einzeln auf Cent runden (kaufmännisch, ohne Gleitkomma-Fehler)
+  const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
+  const base = cents(((monthSollMinutes(year, month) + Math.min(0, otMin)) / 60) * wage);
+  const ot = cents((Math.max(0, otMin) / 60) * wage * OT_FACTOR);
   return nettoMonat(base + ot + parseNum(settings.bonus), {
     klasse: parseNum(settings.taxClass) || 1,
     kirche: !!settings.church,
