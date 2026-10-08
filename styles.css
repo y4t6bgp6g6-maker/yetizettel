@@ -1,20 +1,19 @@
 :root {
-  /* Yetizettel: immer dunkel und dunkler als Stundenzettel (fast schwarze Karten), Orange statt Blau,
-     Warnungen rot – damit man die Apps sofort unterscheidet */
-  --bg: #000000;
-  --card: #0c0c0d;
+  /* Yetizettel: immer dunkel in Mitternachtsblau (wie der Hintergrund des Icons), damit man die Apps sofort unterscheidet */
+  --bg: #03060d;
+  --card: #0b1322;
   --text: #ffffff;
-  --muted: #7c7c82;
-  --sep: #242427;
-  --accent: #ff9f0a;
-  --accent-soft: rgba(255, 159, 10, 0.18);
+  --muted: #7d8aa3;
+  --sep: #1d2b45;
+  --accent: #5aa9ff;
+  --accent-soft: rgba(90, 169, 255, 0.18);
   --danger: #ff453a;
   --success: #30d158;
-  --warning: #ff453a;
-  --fill: #1a1a1c;
-  --inactive: #08080a;
+  --warning: #ff9f0a;
+  --fill: #16223a;
+  --inactive: #070c17;
   --backdrop: rgba(0, 0, 0, 0.55);
-  --sheet: #0e0e10;
+  --sheet: #0d1628;
   color-scheme: dark;
 }
 
@@ -948,7 +947,7 @@ button.nav-title { font-size: 17px; }
 .ov-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: #fff; margin-bottom: 6px; }
 .ov-hero .ov-icon { margin: 0; }
 .ov-icon.ot { background: var(--accent); }
-.ov-icon.vac { background: var(--accent); } /* Urlaub orange, Warnfarbe ist hier rot */
+.ov-icon.vac { background: var(--warning); }
 .ov-icon.sick { background: var(--danger); }
 .ov-num { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ov-hero .ov-num { font-size: 30px; }
@@ -974,8 +973,6 @@ button.nav-title { font-size: 17px; }
 .pv-scroll { flex: 1; position: relative; overflow: hidden; touch-action: none; margin-bottom: env(safe-area-inset-bottom); }
 .pv-page { position: absolute; left: 0; top: 0; display: block; max-width: none; background: #fff; border-radius: 6px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); transform-origin: 0 0; will-change: transform; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 
-/* Rotes Warndreieck statt Emoji */
-.warn-ico { width: 1.1em; height: 1.1em; vertical-align: -0.15em; }
 
 /* Lohn: Einheit hinter dem Eingabefeld; Netto als vierte Spalte in der Übersicht */
 .field .unit { flex: none; color: var(--muted); margin-left: -6px; }
@@ -999,9 +996,9 @@ button.nav-title { font-size: 17px; }
 .ps-verdict svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
 .ps-verdict.ok { color: var(--success); }
 .ps-verdict.diff { color: var(--danger); }
-.ps-verdict.shift { color: var(--accent); }
-.ps-row.shift b { color: var(--accent); }
-.ps-fixed { margin: 10px 4px 0; font-size: 14px; line-height: 1.4; color: var(--accent); }
+.ps-verdict.shift { color: var(--warning); }
+.ps-row.shift b { color: var(--warning); }
+.ps-fixed { margin: 10px 4px 0; font-size: 14px; line-height: 1.4; color: var(--warning); }
 .ps-checks { list-style: none; margin: 10px 4px 0; padding: 0; font-size: 14px; line-height: 1.6; }
 .ps-checks .ok { color: var(--success); }
 .ps-checks .bad { color: var(--danger); }
