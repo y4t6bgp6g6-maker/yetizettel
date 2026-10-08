@@ -1212,7 +1212,7 @@ function renderStats() {
  * das geschätzte Netto als Tabelle, neuester Monat oben, darunter die Summe. Laufender Monat: Prognose („≈“).
  * Monate mit eingelesener Lohnabrechnung bekommen darunter einen Satz: „Abrechnung stimmt“ oder wie viele Stunden
  * (alle Arten zusammen) und wie viel Netto die Abrechnung weniger bzw. mehr hat als die Zettel; Antippen öffnet den
- * Vergleich. Unter der Summe dasselbe für alle Abrechnungen des Jahres.
+ * Vergleich. Unter der Summe die Unterschiede aller Abrechnungen des Jahres als Zahlen in den Spalten.
  */
 function overtimeYearHTML(year, months) {
   const worked = overtimeAccount(true).get(year) || new Map();
@@ -1265,11 +1265,13 @@ function overtimeYearHTML(year, months) {
     .join('');
   const netSum = keys.reduce((a, m) => a + (pay.get(m) ? pay.get(m).netto : 0), 0);
   const n = slips.length;
-  const foot = !n
-    ? ''
-    : ok(sum)
-      ? `<p class="ov-verdict-sum ok">${n === 1 ? 'Die Abrechnung stimmt' : `Alle ${n} Abrechnungen stimmen`} mit deinen Zetteln.</p>`
-      : `<p class="ov-verdict-sum ${sum.h < 0 || sum.e < 0 ? 'neg' : 'ok'}">${n === 1 ? 'Auf der Abrechnung' : `Auf ${n} Abrechnungen zusammen`}: ${diffText(sum).replace(' · ', ' – ')}${withPay && Math.abs(sum.e) >= 0.5 ? ' Netto' : ''}.</p>`;
+  // Unter Gesamt: Stunden und Netto aller Abrechnungen gegenüber den Zetteln (−5,00 h / −60 €), stimmt alles: Haken
+  const sumState = ok(sum) ? 'ok' : sum.h < 0 || sum.e < 0 ? 'neg' : 'ok';
+  const hVal = Math.abs(sum.h) < 0.01 ? '✓' : `${sum.h < 0 ? '−' : '+'}${fmtDec(Math.abs(sum.h) * 60)} h`;
+  const eVal = Math.abs(sum.e) < 0.5 ? '✓' : `${sum.e < 0 ? '−' : '+'}${fmtMoney(Math.abs(sum.e))}`;
+  const foot = n
+    ? `<div class="${cls} ov-sum ov-slipsum ${sumState}"><span class="ov-slipsum-l">Laut Abrechnungen</span><span class="ov-n">${hVal}</span>${withPay ? `<span class="ov-n"></span><span class="ov-n">${eVal}</span>` : '<span class="ov-n"></span>'}</div>`
+    : '';
   return `<div class="card ov-months">
     <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">${withPay ? 'Überstd.' : 'Überstunden'}</span>${withPay ? '<span class="ov-n">Netto</span>' : ''}</div>
     ${rows}

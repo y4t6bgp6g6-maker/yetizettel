@@ -953,7 +953,7 @@ button.nav-title { font-size: 17px; }
 .ov-label { font-size: 14px; color: var(--muted); }
 .ov-hero .ov-label { font-size: 17px; font-weight: 600; color: var(--text); }
 .ov-months { margin-top: 10px; border-radius: 16px; }
-.ov-row { display: grid; grid-template-columns: 1fr 96px 104px; align-items: center; min-height: 44px; padding: 0 16px; border-top: 0.5px solid var(--sep); font-size: 16px; }
+.ov-row { display: grid; grid-template-columns: 88px 1fr 1fr; align-items: center; min-height: 44px; padding: 0 16px; border-top: 0.5px solid var(--sep); font-size: 16px; }
 .ov-head { min-height: 36px; border-top: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
 .ov-n { text-align: right; font-variant-numeric: tabular-nums; }
 .ov-sum { font-weight: 700; background: var(--fill); }
@@ -975,7 +975,7 @@ button.nav-title { font-size: 17px; }
 
 /* Lohn: Einheit hinter dem Eingabefeld; Netto als vierte Spalte in der Übersicht */
 .field .unit { flex: none; color: var(--muted); margin-left: -6px; }
-.ov-row.c4 { grid-template-columns: minmax(0, 1fr) 76px 66px 80px; column-gap: 6px; padding: 0 12px 0 16px; font-size: 14px; white-space: nowrap; }
+.ov-row.c4 { grid-template-columns: 82px 1fr 1fr 1fr; column-gap: 6px; padding: 0 12px 0 16px; font-size: 14px; white-space: nowrap; }
 .ov-row.c4.ov-head { font-size: 12px; }
 
 /* Lohnabrechnungen */
@@ -1016,8 +1016,9 @@ button.nav-title { font-size: 17px; }
 .ov-verdict.ok { color: var(--success); }
 .ov-verdict.neg { color: var(--warning); }
 .ov-total { border-top: 0.5px solid var(--sep); }
-.ov-verdict-sum { margin: 0; padding: 8px 16px 12px; font-size: 14px; font-weight: 600; background: var(--fill); }
-.ov-verdict-sum.ok { color: var(--success); }
-.ov-verdict-sum.neg { color: var(--warning); }
+.ov-slipsum { min-height: 36px; padding-bottom: 6px; font-size: 14px; font-weight: 700; }
+.ov-slipsum-l { white-space: normal; font-size: 11px; line-height: 1.2; padding: 6px 0 2px; }
+.ov-slipsum.neg { color: var(--warning); }
+.ov-slipsum.ok .ov-n { color: var(--success); }
 .ps-when { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 .ps-when select { font: inherit; font-size: 17px; padding: 8px 10px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); }
