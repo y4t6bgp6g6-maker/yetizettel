@@ -471,7 +471,12 @@ function payslipCompareHTML(p) {
     appV == null || slipV == null
       ? psRow(label, appV == null ? '–' : fmtMoney(appV, true), slipV == null ? '–' : fmtMoney(slipV, true), '', false)
       : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(slipV - appV)), Math.abs(appV - slipV) >= 0.05);
-  const w = c.withSlip;
+  // Prüfung der Lohnrechnung: mit den Stunden der Abrechnung muss die App auf dasselbe Netto kommen
+  const check =
+    Math.abs(c.calcDiff) < 0.05
+      ? `<p class="ps-verdict ok">${ICON.check} Mit den Stunden der Abrechnung rechnet die App dasselbe Netto.</p>`
+      : `<p class="ps-verdict diff">Mit den Stunden der Abrechnung rechnet die App ${fmtEuroDiff(c.calcDiff)} Netto anders.</p>`;
+  const a = c.app;
   return `
     <div class="card ps-table">
       <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
@@ -480,16 +485,10 @@ function payslipCompareHTML(p) {
     </div>
     <h2 class="section-title">Lohn</h2>
     <div class="card ps-table">
-      <div class="ps-row ov-head"><span>Nach deinen Zetteln</span><span class="ov-n">App</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
-      ${c.app ? money('Brutto', c.app.brutto, p.brutto) + money('Steuern', c.app.lohnsteuer + c.app.soli + c.app.kirchensteuer, p.steuer) + money('Sozialabgaben', c.app.kv + c.app.rv + c.app.av + c.app.pv, p.sv) + money('Netto', c.app.netto, c.slipNet) : '<div class="ps-row"><span class="muted">Stundenlohn in den Einstellungen eintragen</span></div>'}
+      <div class="ps-row ov-head"><span></span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${a ? money('Brutto', a.brutto, p.brutto) + money('Abgaben', cents(a.lohnsteuer + a.soli + a.kirchensteuer + a.kv + a.rv + a.av + a.pv), p.steuer == null || p.sv == null ? null : cents(p.steuer + p.sv)) + money('Netto', a.netto, c.slipNet) : '<div class="ps-row"><span class="muted">Stundenlohn in den Einstellungen eintragen</span></div>'}
     </div>
-    <div class="card ps-table">
-      <div class="ps-row ov-head"><span>Mit den Stunden der Abrechnung</span><span class="ov-n">App</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
-      ${money('Brutto', w.brutto, p.brutto)}
-      ${money('Steuern', w.lohnsteuer + w.soli + w.kirchensteuer, p.steuer)}
-      ${money('Sozialabgaben', w.kv + w.rv + w.av + w.pv, p.sv)}
-      ${money('Netto', w.netto, c.slipNet)}
-    </div>`;
+    ${check}`;
 }
 
 /** Eingabefeld für einen Wert der Abrechnung (Zahl mit Komma) */
