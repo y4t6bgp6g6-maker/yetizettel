@@ -331,6 +331,7 @@ const PS_LABELS = {
   sv: 'Sozialabgaben',
   netto: 'Netto-Verdienst',
   auszahlung: 'Auszahlung',
+  nettoSonst: 'Weitere Netto-Be-/Abzüge',
   'hours.arbeit': 'Arbeitsstunden',
   'hours.ueber': 'Überstunden',
   'hours.urlaub': 'Urlaub',
@@ -513,9 +514,10 @@ function payslipCompareHTML(p) {
 }
 
 /** Eingabefeld für einen Wert der Abrechnung (Zahl mit Komma) */
-function psField(label, path, value, unit) {
+function psField(label, path, value, unit, signed = false) {
   const v = value == null ? '' : String(Math.round(value * 100) / 100).replace('.', ',');
-  return `<label class="field"><span>${label}</span><input data-ps="${path}" inputmode="decimal" value="${v}" placeholder="–" enterkeyhint="done"><span class="unit">${unit}</span></label>`;
+  // Mit Vorzeichen: Zahlentastatur ohne Minus reicht nicht
+  return `<label class="field"><span>${label}</span><input data-ps="${path}" inputmode="${signed ? 'text' : 'decimal'}" value="${v}" placeholder="–" enterkeyhint="done"><span class="unit">${unit}</span></label>`;
 }
 
 function renderPayslip(key) {
@@ -550,11 +552,12 @@ function renderPayslip(key) {
       ${psField('Netto-Verdienst', 'netto', p.netto, '€')}
       ${psField('Abschlag (bereits erhalten)', 'abschlag', p.abschlag, '€')}
       ${psField('Betriebsrente', 'bav', p.bav, '€')}
+      ${psField('Weitere Netto-Be-/Abzüge (+/−)', 'nettoSonst', p.nettoSonst || 0, '€', true)}
       ${psField('Auszahlung', 'auszahlung', p.auszahlung, '€')}
       ${psField('Zusatzbeitrag Krankenkasse', 'kvZusatz', p.kvZusatz, '%')}
     </div>
     ${(p.fixed || []).length ? `<p class="ps-fixed">Von der App ergänzt, weil auf dem Foto nicht lesbar oder falsch gelesen: ${p.fixed.map((k) => PS_LABELS[k] || k).join(', ')}. Bitte mit der Abrechnung vergleichen.</p>` : ''}
-    <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, 'Netto − Abschlag − Betriebsrente = Auszahlung')}</ul>
+    <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, `Netto − Abschlag − Betriebsrente${p.nettoSonst ? ' ± weitere Be-/Abzüge' : ''} = Auszahlung`)}</ul>
     <p class="footnote">Die Werte stammen aus der Texterkennung. Vergleiche sie mit deiner Abrechnung und korrigiere sie bei Bedarf – die Prüfungen oben zeigen, ob alles zusammenpasst.</p>
     <button class="list-btn destructive card ps-delete" data-act="payslip-delete" data-key="${key}">Lohnabrechnung löschen</button>`;
 }
@@ -585,7 +588,7 @@ function updatePayslipField(input) {
   document.getElementById('ps-compare').innerHTML = payslipCompareHTML(p);
   const chk = payslipChecks(p);
   const mark = (ok, text) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✕'} ${text}</li>`;
-  document.getElementById('ps-checks').innerHTML = `${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, 'Netto − Abschlag − Betriebsrente = Auszahlung')}`;
+  document.getElementById('ps-checks').innerHTML = `${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, `Netto − Abschlag − Betriebsrente${p.nettoSonst ? ' ± weitere Be-/Abzüge' : ''} = Auszahlung`)}`;
 }
 
 /** Foto einer Lohnabrechnung einlesen (Kamera oder Mediathek) */
@@ -651,7 +654,17 @@ async function importPayslip(input) {
         const chk = payslipChecks(p);
         toast(chk.brutto && chk.netto && chk.auszahlung && !p.fixed.length ? 'Eingelesen – alle Prüfungen stimmen' : 'Eingelesen – bitte Werte prüfen', 3000);
       };
-      if (payslips[key]) confirmDialog(`${MONTHS[month - 1]} ${year} ersetzen?`, 'Für diesen Monat gibt es schon eine Lohnabrechnung.', 'Ersetzen', save);
+      // Schon vorhanden: ersetzen – oder den Monat selbst wählen (falls er falsch erkannt wurde)
+      if (payslips[key])
+        confirmDialog(
+          `${MONTHS[month - 1]} ${year} ersetzen?`,
+          'Für diesen Monat gibt es schon eine Lohnabrechnung. Ist es ein anderer Monat, wähle ihn selbst.',
+          'Ersetzen',
+          save,
+          false,
+          'Anderer Monat',
+          () => askPayslipMonth(month, store, year, true)
+        );
       else save();
     };
     if (p.year && p.month) store(p.year, p.month);
@@ -662,18 +675,21 @@ async function importPayslip(input) {
   }
 }
 
-/** Monat der Abrechnung nicht (sicher) erkannt: nachfragen statt raten. month = erkannter Monat oder null */
-function askPayslipMonth(month, done) {
+/**
+ * Monat der Abrechnung nicht (sicher) erkannt oder selbst gewählt: nachfragen statt raten.
+ * month/year = erkannter Monat bzw. erkanntes Jahr oder null; chosen = Monat soll selbst gewählt werden
+ */
+function askPayslipMonth(month, done, year = null, chosen = false) {
   const now = new Date();
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const m = month || prev.getMonth() + 1;
-  // Jahr: das letzte, in dem dieser Monat schon vorbei ist
-  const y = m <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1;
+  // Jahr: das erkannte, sonst das letzte, in dem dieser Monat schon vorbei ist
+  const y = year || (m <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1);
   const years = [];
-  for (let k = now.getFullYear(); k >= now.getFullYear() - 5; k--) years.push(k);
+  for (let k = now.getFullYear(); k >= Math.min(now.getFullYear() - 5, y); k--) years.push(k);
   const modal = openModal(
     `<div class="alert-body"><b>Für welchen Monat ist die Abrechnung?</b>
-      <div class="alert-msg">${month ? 'Das Jahr war auf dem Foto nicht lesbar.' : 'Monat und Jahr waren auf dem Foto nicht lesbar.'}</div>
+      <div class="alert-msg">${chosen ? 'Wähle den Monat, für den die Abrechnung gilt.' : month ? 'Das Jahr war auf dem Foto nicht lesbar.' : 'Monat und Jahr waren auf dem Foto nicht lesbar.'}</div>
       <div class="ps-when">
         <select id="ps-m">${MONTHS.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
         <select id="ps-y">${years.map((k) => `<option ${k === y ? 'selected' : ''}>${k}</option>`).join('')}</select>

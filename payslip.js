@@ -4,6 +4,8 @@
 
 const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 const PAYSLIP_MONTHS = ['januar', 'februar', 'märz', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'dezember'];
+/** Abgekürzte Monatsnamen („für Jan 2025 (1. NB)“) – nur mit Jahreszahl dahinter */
+const PAYSLIP_MONTHS_SHORT = { jan: 1, feb: 2, mär: 3, mar: 3, mrz: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, okt: 10, nov: 11, dez: 12 };
 
 let tesseractLoad = null;
 function loadTesseract() {
@@ -126,6 +128,11 @@ function payslipMonth(lines) {
     const title = /Abrech|Bez[üu]ge|f[üu]r/i.test(line);
     for (const m of line.matchAll(/([A-Za-zÄäÖöÜü]{3,10})[\s_.,|]*((?:\d[\s_]?){4})?/g)) {
       const w = m[1].toLowerCase();
+      const short = PAYSLIP_MONTHS_SHORT[w];
+      if (short && m[2]) {
+        const year = Number(m[2].replace(/\D/g, ''));
+        hits.push({ month: short, year: year >= 2015 && year <= 2099 ? year : null, d: 0, title, li });
+      }
       PAYSLIP_MONTHS.forEach((name, i) => {
         const max = name.length >= 6 ? 2 : name.length >= 4 ? 1 : 0;
         if (w.length < name.length - 1 || w.length > name.length + max) return;
@@ -184,7 +191,8 @@ function payslipLineKind(line) {
  * Werte aus dem erkannten Text.
  * hours: Stunden je Art (arbeit, ueber, urlaub, feiertag, krank, sonst), pay: Beträge der Lohnarten,
  * rate: Stundenlohn, zulage: Zulagen ohne Stunden, brutto/steuer/sv/netto (Netto-Verdienst), abschlag (bereits
- * erhalten), bav (Betriebsrente, Netto-Abzug), auszahlung, kvZusatz (Zusatzbeitrag der Krankenkasse, %).
+ * erhalten), bav (Betriebsrente, Netto-Abzug), nettoSonst (weitere Netto-Be-/Abzüge, z. B. Verrechnung einer
+ * Nachberechnung: + Gutschrift, − Abzug), auszahlung, kvZusatz (Zusatzbeitrag der Krankenkasse, %).
  * fixed: Werte, die nicht direkt gelesen, sondern aus den übrigen berechnet wurden. Fehlendes bleibt null.
  *
  * Die Texterkennung verliest einzelne Zahlen (Stundenlohn „18,40“ als „18740“ oder „28:40“, fehlende Kommas usw.).
@@ -193,6 +201,7 @@ function payslipLineKind(line) {
  *   meisten Zeilen aufgehen; fehlt in einer Zeile Stunden oder Betrag, folgt es aus dem anderen
  * - Gesamt-Brutto = Summe der Lohnarten; Steuer- und SV-Brutto (fünfmal gedruckt) = Gesamt-Brutto − Entgeltumwandlung
  * - SV-Abzüge = KV + RV + AV + PV; Netto = Brutto − Steuern − SV; Auszahlung = Netto − Abschlag − Betriebsrente
+ *   ± weitere Netto-Be-/Abzüge (die Differenz zur gelesenen Auszahlung zählt nur, wenn der Betrag im Text steht)
  * - Jede Zahl, die mehrfach im Text vorkommt, gilt als bestätigt.
  * opts: { rates: bekannte Stundenlöhne, bav, abschlag (Erwartung, falls unlesbar), calc(brutto) → { lohnsteuer, sv } }
  */
@@ -219,6 +228,7 @@ function parsePayslipText(text, opts = {}) {
     netto: null,
     abschlag: 0,
     bav: 0,
+    nettoSonst: 0,
     auszahlung: null,
     kvZusatz: null,
     fixed: [],
@@ -414,6 +424,12 @@ function parsePayslipText(text, opts = {}) {
   if (r.brutto != null && r.steuer != null && r.sv != null) {
     r.netto = psR2(r.brutto - r.steuer - r.sv);
     r.auszahlung = psR2(r.netto - r.abschlag - r.bav);
+    // Weitere Netto-Be-/Abzüge (z. B. „aus NB 01/2025 10,33“): Unterschied zur gelesenen Auszahlung, wenn er im Text steht
+    const extra = auszRead != null ? psR2(auszRead - r.auszahlung) : 0;
+    if (Math.abs(extra) >= 0.01 && seen(Math.abs(extra))) {
+      r.nettoSonst = extra;
+      r.auszahlung = auszRead;
+    }
     if (!psNear(nettoRead, r.netto) && !seen(r.netto)) fixed.add('netto');
     if (!psNear(auszRead, r.auszahlung) && !seen(r.auszahlung)) fixed.add('auszahlung');
   } else {
@@ -436,12 +452,12 @@ function repairPayslip(p) {
     fixed.add(key);
   };
   if (p.brutto != null && p.steuer != null && p.sv != null) set('netto', p.brutto - p.steuer - p.sv);
-  if (p.auszahlung != null) set('netto', p.auszahlung + (p.abschlag || 0) + (p.bav || 0));
+  if (p.auszahlung != null) set('netto', p.auszahlung + (p.abschlag || 0) + (p.bav || 0) - (p.nettoSonst || 0));
   if (p.brutto != null && p.netto != null) {
     if (p.steuer != null) set('sv', p.brutto - p.netto - p.steuer);
     if (p.sv != null) set('steuer', p.brutto - p.netto - p.sv);
   }
-  if (p.netto != null) set('auszahlung', p.netto - (p.abschlag || 0) - (p.bav || 0));
+  if (p.netto != null) set('auszahlung', p.netto - (p.abschlag || 0) - (p.bav || 0) + (p.nettoSonst || 0));
   p.fixed = [...fixed];
   return p;
 }
@@ -452,6 +468,6 @@ function payslipChecks(p) {
   return {
     brutto: near(Math.round(sumPay * 100) / 100, p.brutto),
     netto: near(p.brutto - (p.steuer || 0) - (p.sv || 0), p.netto),
-    auszahlung: near(p.netto - (p.abschlag || 0) - (p.bav || 0), p.auszahlung),
+    auszahlung: near(p.netto - (p.abschlag || 0) - (p.bav || 0) + (p.nettoSonst || 0), p.auszahlung),
   };
 }
