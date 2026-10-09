@@ -1202,7 +1202,7 @@ function renderStats() {
   const yearBtn = (to, label, icon) =>
     `<button class="icon-btn" data-act="ov-year" data-year="${to}" ${to ? '' : 'disabled'} aria-label="${label}">${icon}</button>`;
   const st = stats.get(y);
-  const ot = yearBalance(account.get(y) || new Map());
+  const ot = yearBalance(countedOvertime(y, account.get(y) || new Map()));
   app.innerHTML = `
     <header class="nav">
       <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
@@ -1238,7 +1238,7 @@ function renderStats() {
     </div>
     <p class="footnote">Foto aufnehmen oder aus der Mediathek wählen. Die App liest die Abrechnung und vergleicht sie mit deinen Zetteln. Das Foto bleibt auf dem iPhone und wird nicht gespeichert.</p>
     <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
-    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Es zählen nur Tage mit Anfangs- und Enduhrzeit oder mit Urlaub, Krank, Feiertag oder Frei. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
+    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Es zählen nur Tage mit Anfangs- und Enduhrzeit oder mit Urlaub, Krank, Feiertag oder Frei. Plus und Minus werden verrechnet. Monate mit Werktagen ohne Eintrag zählen keine Überstunden, bis sie vollständig sind. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
 }
 
 /**
@@ -1263,6 +1263,12 @@ function monthGaps(year, month) {
   return gaps;
 }
 
+/** Überstunden je Monat ohne die unvollständigen Monate – dort sind alle Stunden normale Arbeitsstunden; der laufende Monat zählt immer */
+function countedOvertime(year, months) {
+  const now = new Date();
+  return new Map([...months].filter(([m]) => (year === now.getFullYear() && m === now.getMonth() + 1) || !monthGaps(year, m).length));
+}
+
 /**
  * Je Monat die gearbeiteten Stunden (Stunden Gesamt), die Überstunden und – mit Stundenlohn in den Einstellungen –
  * das geschätzte Netto als Tabelle, neuester Monat oben, darunter die Summe. Laufender Monat: Prognose („≈“).
@@ -1275,7 +1281,6 @@ function monthGaps(year, month) {
 function overtimeYearHTML(year, months) {
   const worked = overtimeAccount(true).get(year) || new Map();
   const total = yearBalance(worked);
-  const ot = yearBalance(months);
   const slips = Object.values(payslips).filter((p) => p.year === year);
   const used = [...new Set([...months.keys(), ...slips.map((p) => p.month)])];
   if (!used.length) return '';
@@ -1287,6 +1292,8 @@ function overtimeYearHTML(year, months) {
   for (let m = last; m >= Math.min(...used); m--) keys.push(m);
   // Der laufende Monat gilt nie als unvollständig, er bekommt stattdessen „laufender Monat“
   const gaps = new Map(keys.map((m) => [m, isCurrent(m) ? [] : monthGaps(year, m)]));
+  // Überstunden nur aus vollständigen Monaten (und dem laufenden)
+  const ot = keys.reduce((a, m) => a + (gaps.get(m).length ? 0 : months.get(m) || 0), 0);
   const withPay = hasWage();
   // Netto nur für vollständige Monate und als Prognose für den laufenden Monat
   const pay = new Map(
@@ -1330,7 +1337,7 @@ function overtimeYearHTML(year, months) {
         <div class="${cls}">
           <span>${MONTHS[m - 1]}</span>
           <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
-          <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
+          ${gaps.get(m).length ? '<b class="ov-n">–</b>' : `<b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>`}
           ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
         </div>
         ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m, !!slip)}${line}
