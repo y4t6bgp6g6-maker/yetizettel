@@ -2823,26 +2823,28 @@ async function importBackup(input) {
         lines.push(`${label}: ${parts.join(', ')}`);
         continue;
       }
-      const s = await importTimesheetFile(file.name, buf);
-      const existing = existingSheet(sheetFirstDate(s));
-      const other = s.importedName && s.importedName.trim() !== s.name;
-      delete s.importedName;
-      if (existing) {
-        const range = `${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}`;
-        if (!sheetDiff(existing, s).length) lines.push(`${label}: ${range} schon vorhanden (gleich)`);
-        else {
-          conflicts.push({ existing, incoming: s, stamp: file.lastModified, stampLabel: 'Datei vom', file: file.name });
-          lines.push(`${label}: ${range} schon vorhanden, mit Unterschieden`);
+      // Woche über ein Monatsende: ein Zettel je Monat
+      for (const s of await importTimesheetFile(file.name, buf)) {
+        const existing = existingSheet(sheetFirstDate(s));
+        const other = s.importedName && s.importedName.trim() !== s.name;
+        delete s.importedName;
+        if (existing) {
+          const range = `${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}`;
+          if (!sheetDiff(existing, s).length) lines.push(`${label}: ${range} schon vorhanden (gleich)`);
+          else {
+            conflicts.push({ existing, incoming: s, stamp: file.lastModified, stampLabel: 'Datei vom', file: file.name });
+            lines.push(`${label}: ${range} schon vorhanden, mit Unterschieden`);
+          }
+          continue;
         }
-        continue;
+        s.sentAt = Date.now(); // eingelesene Zettel gelten als schon gesendet
+        sheets.push(s);
+        saveSheets(s);
+        total++;
+        lines.push(
+          `${label}: ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}, ${fmtH(sheetTotal(s))}${other ? ` · Name auf „${escapeHtml(s.name)}“ geändert` : ''}`
+        );
       }
-      s.sentAt = Date.now(); // eingelesene Zettel gelten als schon gesendet
-      sheets.push(s);
-      saveSheets(s);
-      total++;
-      lines.push(
-        `${label}: ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}, ${fmtH(sheetTotal(s))}${other ? ` · Name auf „${escapeHtml(s.name)}“ geändert` : ''}`
-      );
     } catch (e) {
       lines.push(`${label}: konnte nicht gelesen werden${e && e.message && e.message !== 'format' ? ` (${escapeHtml(e.message)})` : ''}`);
     }

@@ -1,6 +1,6 @@
 'use strict';
 // Stundenzettel aus Numbers-Dateien (.numbers) und aus PDFs einlesen – ohne externe Bibliothek.
-// Ergebnis ist immer dasselbe Zwischenformat (siehe parsedToSheet):
+// Ergebnis ist immer dasselbe Zwischenformat (siehe parsedToSheets):
 //   { name, from: Date, to: Date, days: [{ day: 0–6, rows: [{ start, end, site, work }], pause, status }] }
 
 // ───────────────────────── Hilfen ─────────────────────────
@@ -827,10 +827,12 @@ function pdfItemsToParsed(items) {
       day.texts.push(...r.all.map(stripWeekday).filter(Boolean));
       if (r.pause && day.pause == null) day.pause = parseDuration(r.pause);
       const e = { start: parseClock(r.start), end: parseClock(r.end), site: r.site || '', work: r.work || '' };
-      // Umbrochener Text (zweite Zeile derselben Zelle) gehört zur Zeile darüber
+      // Umbrochener Text (weitere Zeile derselben Zelle) gehört zur Zeile darüber; Abstand zur zuletzt
+      // angehängten Textzeile, damit auch eine dritte Zeile dazukommt
       if (last && e.start == null && e.end == null && r.y - last.y < r.size * 1.6) {
         if (e.site) last.e.site = `${last.e.site} ${e.site}`.trim();
         if (e.work) last.e.work = `${last.e.work} ${e.work}`.trim();
+        last.y = r.y;
         continue;
       }
       const before = day.rows.length;
@@ -848,17 +850,23 @@ function pdfItemsToParsed(items) {
 /** Woche aus dem Dateinamen, falls im Zettel kein Datum steht: „Stundenzettel 05.01.26 - 11.01.26“ */
 const dateFromFileName = (name) => parseDateText(name);
 
-/** Baut einen Stundenzettel; anchor = „Woche von“ (bestimmt Woche und Monat) */
-function parsedToSheet(parsed, fileName) {
+/**
+ * Baut die Stundenzettel einer Woche; anchor = „Woche von“ (bestimmt die Woche). Geht die Woche über ein Monatsende,
+ * entsteht wie in der App je Monat ein Zettel mit den Tagen dieses Monats – für jeden Monat mit Einträgen; steht
+ * gar nichts im Zettel, ein leerer für den Monat von „Woche von“.
+ */
+function parsedToSheets(parsed, fileName) {
   const anchor = parsed.from || dateFromFileName(fileName);
   if (!anchor) throw new Error('Kein Datum („Woche von“) gefunden');
   // Eigener Name aus den Einstellungen hat Vorrang (z. B. beim Einlesen des Zettels eines Kollegen)
   const s = newSheet(anchor, settings.name.trim() || parsed.name || '');
   s.importedName = parsed.name || '';
   const seen = new Set();
+  const filled = new Set();
   for (const d of parsed.days) {
     if (seen.has(d.day)) continue; // doppelte Wochentage: nur der erste zählt
     seen.add(d.day);
+    if (d.status || d.rows.length || d.pause) filled.add(d.day);
     const day = s.days[d.day];
     const rows = d.rows.map((r) => ({ id: uid(), start: r.start, end: r.end, site: r.site || '', work: r.work || '' }));
     if (d.status) {
@@ -878,23 +886,34 @@ function parsedToSheet(parsed, fileName) {
       day.pause = d.pause;
     }
   }
-  markHolidays(s);
-  return s;
+  // Je Monat der Woche ein Zettel, der nur die Tage dieses Monats übernimmt
+  const parts = [];
+  for (let i = 0; i < 7; i++) {
+    const part = newSheet(sheetDate(s, i), s.name);
+    if (parts.some((x) => x.year === part.year && x.month === part.month)) continue;
+    part.importedName = s.importedName;
+    for (const k of sheetActiveDays(part)) part.days[k] = s.days[k];
+    parts.push(part);
+  }
+  let result = parts.filter((x) => sheetActiveDays(x).some((k) => filled.has(k)));
+  if (!result.length) result = parts.filter((x) => x.year === s.year && x.month === s.month);
+  result.forEach(markHolidays);
+  return result;
 }
 
-/** Eine Datei (ArrayBuffer) einlesen → Stundenzettel */
+/** Eine Datei (ArrayBuffer) einlesen → Stundenzettel (bei Wochen über ein Monatsende einer je Monat) */
 async function importTimesheetFile(name, buf) {
   const lower = name.toLowerCase();
   const head = new Uint8Array(buf.slice(0, 4));
   const isPdf = lower.endsWith('.pdf') || (head[0] === 0x25 && head[1] === 0x50);
-  if (isPdf) return parsedToSheet(pdfItemsToParsed(await readPdfItems(buf)), name);
+  if (isPdf) return parsedToSheets(pdfItemsToParsed(await readPdfItems(buf)), name);
   // Numbers-Dateien sind ZIP-Archive (beginnen mit „PK“)
   if (!(head[0] === 0x50 && head[1] === 0x4b)) throw new Error('nur Numbers-, PDF- oder Sicherungsdateien');
   const tables = await readNumbersTables(buf);
   let lastError = null;
   for (const t of tables) {
     try {
-      return parsedToSheet(gridToParsed(t.grid), name);
+      return parsedToSheets(gridToParsed(t.grid), name);
     } catch (e) {
       lastError = e;
     }
