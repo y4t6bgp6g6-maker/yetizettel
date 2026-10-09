@@ -483,9 +483,8 @@ function payslipCompareHTML(p) {
       ${hRows}
       ${psRow('Gesamt', fmtH(sum(c.hours) * 60), fmtH(sum(p.hours) * 60), fmtHDiff(sumDiff), Math.abs(sumDiff) >= 0.01, 'ov-sum')}
     </div>
-    <h2 class="section-title">Lohn</h2>
     <div class="card ps-table">
-      <div class="ps-row ov-head"><span></span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      <div class="ps-row ov-head"><span>Lohn</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
       ${a ? money('Brutto', a.brutto, p.brutto) + money('Abgaben', cents(a.lohnsteuer + a.soli + a.kirchensteuer + a.kv + a.rv + a.av + a.pv), p.steuer == null || p.sv == null ? null : cents(p.steuer + p.sv)) + money('Netto', a.netto, c.slipNet) : '<div class="ps-row"><span class="muted">Stundenlohn in den Einstellungen eintragen</span></div>'}
     </div>
     ${check}`;
