@@ -985,9 +985,9 @@ button.nav-title { font-size: 17px; }
 .ps-dot.ok { background: var(--success); }
 .ps-dot.diff { background: var(--danger); }
 .ps-sub { margin: -8px 4px 14px; color: var(--muted); }
-.ps-tarif { margin-bottom: 14px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
-.ps-tarif b { color: var(--warning); font-weight: 600; }
-.ps-tarif p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.ps-warncard { margin-bottom: 14px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
+.ps-warncard b { color: var(--warning); font-weight: 600; }
+.ps-warncard p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
 .ps-table { margin-top: 10px; }
 .ps-row { display: grid; grid-template-columns: 1fr 76px 84px 78px; align-items: center; min-height: 40px; padding: 0 12px 0 14px; border-top: 0.5px solid var(--sep); font-size: 14px; white-space: nowrap; }
 .ps-row.ov-head { min-height: 32px; border-top: 0; font-size: 11px; white-space: normal; }
@@ -1018,6 +1018,10 @@ button.nav-title { font-size: 17px; }
 .ov-verdict svg { width: 14px; height: 14px; }
 .ov-verdict.ok { color: var(--success); }
 .ov-verdict.neg { color: var(--warning); }
+.ov-verdict.gap { color: var(--warning); font-weight: 500; }
+.ov-verdict + .ov-verdict { margin-top: -4px; }
+/* Monat mit Werktagen ohne Eintrag: schraffiert wie Lücken in der Liste */
+.ov-month.has-gap { background: repeating-linear-gradient(-45deg, transparent 0 7px, color-mix(in srgb, var(--warning) 12%, transparent) 7px 14px); }
 .ov-total { border-top: 0.5px solid var(--sep); }
 .ov-slipsum { min-height: 36px; padding-bottom: 6px; font-size: 14px; font-weight: 700; }
 .ov-slipsum-l { white-space: normal; font-size: 11px; line-height: 1.2; padding: 6px 0 2px; }

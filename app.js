@@ -362,7 +362,14 @@ function tarifWarning(year) {
 }
 const tarifWarningHTML = (year) => {
   const w = tarifWarning(year);
-  return w ? `<div class="card ps-tarif"><b>⚠️ ${w.title}</b><p>${w.text}</p></div>` : '';
+  return w ? `<div class="card ps-warncard"><b>⚠️ ${w.title}</b><p>${w.text}</p></div>` : '';
+};
+/** Hinweis auf der Abrechnungsseite, wenn im Monat Werktage ohne Eintrag sind */
+const gapWarningHTML = (p) => {
+  const n = monthGaps(p.year, p.month).length;
+  return n
+    ? `<div class="card ps-warncard"><b>⚠️ Monat unvollständig</b><p>${n} ${n === 1 ? 'Werktag hat' : 'Werktage haben'} noch keinen Eintrag. Der Vergleich mit der Abrechnung ist erst aussagekräftig, wenn alle Tage eingetragen sind.</p></div>`
+    : '';
 };
 
 /**
@@ -468,7 +475,10 @@ function payslipCompareHTML(p) {
         .map(([, label]) => label)
         .join(' / ')}).</p>`
     : '';
-  const headline = c.hoursOk
+  // Unvollständiger Monat: kein Urteil über die Stunden (fehlende Werktage zählen dort wie Soll), die Warnkarte reicht
+  const headline = monthGaps(p.year, p.month).length
+    ? ''
+    : c.hoursOk
     ? `<p class="ps-verdict ok">${ICON.check} Die bezahlten Stunden stimmen mit deinen Zetteln überein.</p>${shiftNote}`
     : `<p class="ps-verdict diff">Auf der Abrechnung gegenüber deinen Zetteln: ${HOUR_KINDS.filter(([k]) => (k === 'ueber' || !c.shifted) && Math.abs(c.hourDiff[k]) >= 0.01)
         .map(([k, label]) => `${label} ${fmtHDiff(c.hourDiff[k])}`)
@@ -519,7 +529,7 @@ function renderPayslip(key) {
     </header>
     <h1 class="large-title">${MONTHS[p.month - 1]} ${p.year}</h1>
     <p class="ps-sub">Lohnabrechnung im Vergleich</p>
-    ${tarifWarningHTML(p.year)}
+    ${gapWarningHTML(p)}${tarifWarningHTML(p.year)}
     <div id="ps-compare">${payslipCompareHTML(p)}</div>
 
     <h2 class="section-title">Werte der Abrechnung</h2>
@@ -1227,8 +1237,32 @@ function renderStats() {
 }
 
 /**
+ * Werktage (Mo–Fr ohne Feiertage) eines Monats bis gestern, für die noch nichts eingetragen ist – ein Tag zählt wie im
+ * Überstunden-Konto erst mit einer Zeile mit Anfangs- und Enduhrzeit oder mit Urlaub, Krank, Feiertag oder Frei
+ */
+function monthGaps(year, month) {
+  const done = new Set();
+  for (const s of sheets) {
+    if (s.year !== year || s.month !== month) continue;
+    for (const i of sheetActiveDays(s)) {
+      const d = s.days[i];
+      if (d.status || d.rows.some((r) => r.start != null && r.end != null)) done.add(isoDate(sheetDate(s, i)));
+    }
+  }
+  const today = startOfDay(new Date());
+  const gaps = [];
+  for (const d = new Date(year, month - 1, 1); d.getMonth() === month - 1 && d < today; d.setDate(d.getDate() + 1)) {
+    if (d.getDay() === 0 || d.getDay() === 6 || holidayName(d) || done.has(isoDate(d))) continue;
+    gaps.push(new Date(d));
+  }
+  return gaps;
+}
+
+/**
  * Je Monat die gearbeiteten Stunden (Stunden Gesamt), die Überstunden und – mit Stundenlohn in den Einstellungen –
  * das geschätzte Netto als Tabelle, neuester Monat oben, darunter die Summe. Laufender Monat: Prognose („≈“).
+ * Fehlen in einem Monat Einträge (auch ganze Monate ohne Zettel zwischen dem ersten und dem laufenden bzw. letzten
+ * Monat), steht darunter ein Hinweis und das Netto bleibt leer – nur der laufende Monat bekommt die Prognose.
  * Monate mit eingelesener Lohnabrechnung bekommen darunter einen Satz: „Abrechnung stimmt“ oder wie viele Stunden
  * (alle Arten zusammen) und wie viel Netto die Abrechnung weniger bzw. mehr hat als die Zettel; Antippen öffnet den
  * Vergleich. Unter der Summe die Unterschiede aller Abrechnungen des Jahres als Zahlen in den Spalten.
@@ -1238,12 +1272,26 @@ function overtimeYearHTML(year, months) {
   const total = yearBalance(worked);
   const ot = yearBalance(months);
   const slips = Object.values(payslips).filter((p) => p.year === year);
-  const keys = [...new Set([...months.keys(), ...slips.map((p) => p.month)])].sort((a, b) => b - a);
-  if (!keys.length) return '';
-  const withPay = hasWage();
-  const pay = new Map(keys.map((m) => [m, withPay ? monthPay(year, m, months.get(m) || 0) : null]));
+  const used = [...new Set([...months.keys(), ...slips.map((p) => p.month)])];
+  if (!used.length) return '';
   const now = new Date();
-  const net = (m) => (pay.get(m) ? `${year === now.getFullYear() && m === now.getMonth() + 1 ? '≈ ' : ''}${fmtMoney(pay.get(m).netto)}` : '–');
+  const isCurrent = (m) => year === now.getFullYear() && m === now.getMonth() + 1;
+  // Alle Monate vom ersten mit Einträgen bis zum laufenden (bzw. letzten), auch solche ganz ohne Zettel
+  const last = Math.max(...used, year === now.getFullYear() ? now.getMonth() + 1 : 0);
+  const keys = [];
+  for (let m = last; m >= Math.min(...used); m--) keys.push(m);
+  const gaps = new Map(keys.map((m) => [m, monthGaps(year, m)]));
+  const withPay = hasWage();
+  // Netto nur für vollständige Monate und als Prognose für den laufenden Monat
+  const pay = new Map(
+    keys.map((m) => [m, withPay && (isCurrent(m) || !gaps.get(m).length) ? monthPay(year, m, months.get(m) || 0) : null])
+  );
+  const net = (m) => (pay.get(m) ? `${isCurrent(m) ? '≈ ' : ''}${fmtMoney(pay.get(m).netto)}` : '–');
+  /** „⚠️ 3 Werktage ohne Eintrag“ (mit „›“, wenn eine Abrechnung zum Antippen da ist) */
+  const gapLine = (m, link) => {
+    const n = gaps.get(m).length;
+    return n ? `<div class="ov-verdict gap">⚠️ ${n} ${n === 1 ? 'Werktag' : 'Werktage'} ohne Eintrag${link ? ' ›' : ''}</div>` : '';
+  };
   const cls = withPay ? 'ov-row c4' : 'ov-row';
   /** „3“, „3,5“, „10,25“ Stunden */
   const hrs = (h) => fmtDec(Math.abs(h) * 60).replace(/,00$/, '').replace(/(,\d)0$/, '$1');
@@ -1262,7 +1310,8 @@ function overtimeYearHTML(year, months) {
       const v = months.get(m) || 0;
       const slip = payslips[payKey(year, m)];
       let line = '';
-      if (slip) {
+      // Unvollständiger Monat: kein Vergleich mit der Abrechnung (Antippen öffnet ihn trotzdem, mit Hinweis)
+      if (slip && !gaps.get(m).length) {
         const c = payslipCompare(slip);
         const d = { h: HOUR_KINDS.reduce((a, [k]) => a + (slip.hours[k] || 0) - (c.hours[k] || 0), 0), e: c.netDiff || 0 };
         sum.h += d.h;
@@ -1271,19 +1320,20 @@ function overtimeYearHTML(year, months) {
           ? `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt ›</div>`
           : `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">⚠️ ${diffText(d)} ›</div>`;
       }
-      return `<${slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div'} class="ov-month">
+      return `<${slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div'} class="ov-month${gaps.get(m).length ? ' has-gap' : ''}">
         <div class="${cls}">
           <span>${MONTHS[m - 1]}</span>
           <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
           <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
           ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
         </div>
-        ${line}
+        ${gapLine(m, !!slip)}${line}
       </${slip ? 'a' : 'div'}>`;
     })
     .join('');
   const netSum = keys.reduce((a, m) => a + (pay.get(m) ? pay.get(m).netto : 0), 0);
-  const n = slips.length;
+  // Unter Gesamt nur Abrechnungen vollständiger Monate
+  const n = slips.filter((p) => !(gaps.get(p.month) || []).length).length;
   // Unter Gesamt: Stunden und Netto aller Abrechnungen gegenüber den Zetteln (−5,00 h / −60 €), stimmt alles: Haken
   const sumState = ok(sum) ? 'ok' : sum.h < 0 || sum.e < 0 ? 'neg' : 'ok';
   const hVal = Math.abs(sum.h) < 0.01 ? '✓' : `${sum.h < 0 ? '−' : '+'}${fmtDec(Math.abs(sum.h) * 60)} h`;
