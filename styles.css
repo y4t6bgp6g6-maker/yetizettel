@@ -985,6 +985,9 @@ button.nav-title { font-size: 17px; }
 .ps-dot.ok { background: var(--success); }
 .ps-dot.diff { background: var(--danger); }
 .ps-sub { margin: -8px 4px 14px; color: var(--muted); }
+.ps-tarif { margin-bottom: 14px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
+.ps-tarif b { color: var(--warning); font-weight: 600; }
+.ps-tarif p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
 .ps-table { margin-top: 10px; }
 .ps-row { display: grid; grid-template-columns: 1fr 76px 84px 78px; align-items: center; min-height: 40px; padding: 0 12px 0 14px; border-top: 0.5px solid var(--sep); font-size: 14px; white-space: nowrap; }
 .ps-row.ov-head { min-height: 32px; border-top: 0; font-size: 11px; white-space: normal; }

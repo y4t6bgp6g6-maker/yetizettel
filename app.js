@@ -348,7 +348,22 @@ const lohnOpts = (bav, year, month, zusatz) => ({
   zusatz: zusatz ?? (year ? monthValue(year, month, 'kvZusatz', parseNum(settings.kvExtra)) : parseNum(settings.kvExtra)),
   bav,
   year,
+  month,
 });
+/** Steuertarif eines Jahres fehlt in der App: Hinweistext, sonst null */
+function tarifWarning(year) {
+  if (!year || lohnJahrBekannt(year)) return null;
+  const known = Object.keys(LOHN_JAHRE).map(Number);
+  const used = year < known[0] ? known[0] : known.at(-1);
+  return {
+    title: `Steuertarif ${year} unbekannt`,
+    text: `Die App kennt die Steuer- und Beitragswerte für ${year} ${year > used ? 'noch nicht' : 'nicht'} und rechnet mit denen von ${used}. Die Werte der Abrechnung selbst sind davon nicht betroffen, aber Lohnsteuer und Netto im Vergleich können abweichen.`,
+  };
+}
+const tarifWarningHTML = (year) => {
+  const w = tarifWarning(year);
+  return w ? `<div class="card ps-tarif"><b>⚠️ ${w.title}</b><p>${w.text}</p></div>` : '';
+};
 
 /**
  * Stunden eines Monats aus den Zetteln, aufgeteilt wie auf der Lohnabrechnung (in Stunden):
@@ -504,6 +519,7 @@ function renderPayslip(key) {
     </header>
     <h1 class="large-title">${MONTHS[p.month - 1]} ${p.year}</h1>
     <p class="ps-sub">Lohnabrechnung im Vergleich</p>
+    ${tarifWarningHTML(p.year)}
     <div id="ps-compare">${payslipCompareHTML(p)}</div>
 
     <h2 class="section-title">Werte der Abrechnung</h2>
@@ -579,7 +595,8 @@ async function importPayslip(input) {
   // when: Monat und Jahr, falls von Hand gewählt
   const parse = (text, when = null) => {
     const first = Object.assign(parsePayslipText(text, opts), when);
-    if (!first.year) return first;
+    // Ohne bekannten Tarif des Jahres keine Gegenprobe über nachgerechnete Steuern (würde falsche Werte bevorzugen)
+    if (!first.year || !lohnJahrBekannt(first.year)) return first;
     // Steuern und Sozialabgaben zum Vergleich nachrechnen (Tarif des Jahres, Zusatzbeitrag von der Abrechnung)
     const calc = (brutto, zusatz) => {
       const n = nettoMonat(brutto, lohnOpts(first.bav, first.year, first.month, zusatz ?? undefined));
@@ -614,6 +631,8 @@ async function importPayslip(input) {
         payslips[key] = p;
         savePayslips();
         location.hash = `#/lohn/${key}`;
+        const w = tarifWarning(year);
+        if (w) return infoDialog(`⚠️ ${w.title}`, w.text);
         const chk = payslipChecks(p);
         toast(chk.brutto && chk.netto && chk.auszahlung && !p.fixed.length ? 'Eingelesen – alle Prüfungen stimmen' : 'Eingelesen – bitte Werte prüfen', 3000);
       };

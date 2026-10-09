@@ -1,11 +1,44 @@
-// Netto-Schätzung für einen Monat: Lohnsteuer nach dem Einkommensteuertarif 2025 bzw. 2026 (Programmablaufplan,
-// vereinfacht) und Sozialabgaben Arbeitnehmeranteil. Ergebnis ist eine Schätzung, keine Lohnabrechnung.
-// Geprüft an echten Abrechnungen 2025 und 2026 (Steuerklasse I, kinderlos, ohne Kirchensteuer): Lohnsteuer und
-// Sozialabgaben stimmen auf den Cent.
+// Netto-Schätzung für einen Monat: Lohnsteuer nach dem Einkommensteuertarif 2024, 2025 bzw. 2026
+// (Programmablaufplan, vereinfacht) und Sozialabgaben Arbeitnehmeranteil. Ergebnis ist eine Schätzung, keine
+// Lohnabrechnung. Geprüft an echten Abrechnungen 2025 und 2026 (Steuerklasse I, kinderlos, ohne Kirchensteuer):
+// Lohnsteuer und Sozialabgaben stimmen auf den Cent; 2024 an den Prüffällen des BMF.
+
+const LOHN_2024 = {
+  bbgKv: 5175,
+  bbgRv: 7550, // West
+  mindestVsp: true, // Mindestvorsorgepauschale (bis 2025)
+  kv: 7.3,
+  kvVsp: 7.0,
+  rv: 9.3,
+  av: 1.3,
+  pv: 1.7,
+  pvKinderlos: 0.6,
+  pvAbschlag: 0.25,
+  bavSteuerfrei: 604,
+  bavSvFrei: 302,
+  werbungskosten: 1230,
+  sonderausgaben: 36,
+  entlastung: 4260,
+  entlastungWeitere: 240,
+  soliFreigrenze: 18130,
+  kirche: 9,
+  w1: 13279,
+  w2: 33380,
+  w3: 222260,
+  tarif: [11604, 17005, 66760, 277825, 922.98, 1025.38, 181.19, 10602.13, 18936.88],
+};
+// Grundfreibetrag 2024 rückwirkend erhöht: im Dezember 2024 rechnete die Lohnabrechnung das ganze Jahr mit dem
+// neuen Tarif nach (PAP Dezember 2024, „MLST1224“)
+const LOHN_2024_NEU = {
+  ...LOHN_2024,
+  w1: 13432,
+  tarif: [11784, 17005, 66760, 277825, 954.8, 991.21, 181.19, 10636.31, 18971.06],
+};
 
 const LOHN_2025 = {
   bbgKv: 5512.5,
   bbgRv: 8050,
+  mindestVsp: true,
   kv: 7.3,
   kvVsp: 7.0,
   rv: 9.3,
@@ -53,8 +86,11 @@ const LOHN_2026 = {
   tarif: [12348, 17799, 69878, 277825, 914.51, 1034.87, 173.1, 11135.63, 19470.38],
 };
 
-/** Werte des Jahres (vor 2025 wie 2025, nach 2026 wie 2026) */
-const lohnJahr = (year) => (year && year <= 2025 ? LOHN_2025 : LOHN_2026);
+const LOHN_JAHRE = { 2024: LOHN_2024, 2025: LOHN_2025, 2026: LOHN_2026 };
+/** Kennt die App den Steuertarif dieses Jahres? */
+const lohnJahrBekannt = (year) => !!LOHN_JAHRE[year];
+/** Werte des Jahres (vor 2024 wie 2024, nach 2026 wie 2026; ohne Jahr 2026) */
+const lohnJahr = (year) => LOHN_JAHRE[year] || (year && year < 2024 ? LOHN_2024 : LOHN_2026);
 
 /** Einkommensteuer nach Grundtarif (ganze Euro) */
 function tarifJahr(zve, c = LOHN_2026) {
@@ -92,7 +128,7 @@ function tarif56(zzx, c = LOHN_2026) {
 /**
  * Netto für einen Monat.
  * brutto: steuer- und beitragspflichtiger Bruttolohn (Grundlohn, Überstunden, Zulagen)
- * opts: { klasse 1–6, kirche, kinder, zusatz (KV-Zusatzbeitrag %), bav (Entgeltumwandlung € je Monat), year }
+ * opts: { klasse 1–6, kirche, kinder, zusatz (KV-Zusatzbeitrag %), bav (Entgeltumwandlung € je Monat), year, month }
  * Ergebnis: { brutto, lohnsteuer, soli, kirchensteuer, kv, rv, av, pv, bav, netto }
  */
 function nettoMonat(brutto, opts) {
@@ -118,19 +154,34 @@ function nettoMonat(brutto, opts) {
 
   // Lohnsteuer über den Jahresbetrag
   const jahr = steuerBrutto * 12;
+  const vspRv = (Math.min(jahr, c.bbgRv * 12) * c.rv) / 100;
+  // Mindestvorsorgepauschale (bis 2025): 12 % des Lohns, höchstens 1.900 € (Steuerklasse III 3.000 €)
+  const vspMin = !c.mindestVsp ? 0 : Math.min(Math.floor(jahr * 12) / 100, klasse === 3 ? 3000 : 1900);
   const vsp = Math.ceil(
-    (Math.min(jahr, c.bbgRv * 12) * c.rv) / 100 + (Math.min(jahr, c.bbgKv * 12) * (c.kvVsp + zusatz / 2 + pvSatz)) / 100
+    vspRv + Math.max(vspMin, (Math.min(jahr, c.bbgKv * 12) * (c.kvVsp + zusatz / 2 + pvSatz)) / 100)
   );
   let frei = vsp;
   if (klasse !== 6) frei += c.werbungskosten + c.sonderausgaben;
   if (klasse === 2) frei += c.entlastung + c.entlastungWeitere * Math.max(0, kinder - 1);
   const zve = Math.max(0, Math.floor(jahr - frei));
-  let st;
-  if (klasse === 3) st = 2 * tarifJahr(Math.floor(zve / 2), c);
-  else if (klasse === 5 || klasse === 6) st = tarif56(zve, c);
-  else st = tarifJahr(zve, c);
-  const freigrenze = c.soliFreigrenze * (klasse === 3 ? 2 : 1);
-  const soliJahr = st > freigrenze ? Math.min(st * 0.055, (st - freigrenze) * 0.119) : 0;
+  // Jahressteuer und Jahres-Soli nach einem Tarif
+  const steuer = (t) => {
+    let st;
+    if (klasse === 3) st = 2 * tarifJahr(Math.floor(zve / 2), t);
+    else if (klasse === 5 || klasse === 6) st = tarif56(zve, t);
+    else st = tarifJahr(zve, t);
+    const freigrenze = t.soliFreigrenze * (klasse === 3 ? 2 : 1);
+    const soli = st > freigrenze ? Math.min(st * 0.055, (st - freigrenze) * 0.119) : 0;
+    return { st, soli: Math.floor(soli * 100) / 100 };
+  };
+  let { st, soli: soliJahr } = steuer(c);
+  if (opts.year === 2024 && opts.month === 12) {
+    // Dezember 2024: Jahressteuer nach neuem Tarif, abzüglich der elf Monate, die nach altem Tarif zu viel gezahlt wurden
+    const neu = steuer(LOHN_2024_NEU);
+    const nach = (n, a) => Math.max(0, n - 11 * (a - n));
+    st = nach(neu.st, st);
+    soliJahr = nach(neu.soli, soliJahr);
+  }
   const lohnsteuer = Math.floor((st / 12) * 100) / 100;
   const soli = Math.floor((soliJahr / 12) * 100) / 100;
   const kirchensteuer = opts.kirche ? Math.floor(((st * c.kirche) / 100 / 12) * 100) / 100 : 0;
