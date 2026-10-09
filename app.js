@@ -472,31 +472,12 @@ function payslipCompareHTML(p) {
       ? psRow(label, appV == null ? '–' : fmtMoney(appV, true), slipV == null ? '–' : fmtMoney(slipV, true), '', false)
       : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(slipV - appV)), Math.abs(appV - slipV) >= 0.05);
   const w = c.withSlip;
-  const verdict =
-    Math.abs(c.calcDiff) < 0.05
-      ? `<p class="ps-verdict ok">${ICON.check} Mit den Stunden der Abrechnung kommt die App auf dasselbe Netto${Math.abs(c.calcDiff) >= 0.005 ? ` (${fmtEuroDiff(c.calcDiff)} Rundung)` : ''}.</p>`
-      : `<p class="ps-verdict diff">Auch mit den Stunden der Abrechnung rechnet die App ${fmtEuroDiff(c.calcDiff)} Netto anders – prüfe Stundenlohn, Zulage und die Lohn-Einstellungen.</p>`;
-  const shiftNote = c.shifted
-    ? `<p class="ps-verdict shift">Bezahlt sind gleich viele Stunden, sie sind nur anders verbucht (${HOUR_KINDS.filter(([k]) => k !== 'ueber' && Math.abs(c.hourDiff[k]) >= 0.01)
-        .map(([, label]) => label)
-        .join(' / ')}).</p>`
-    : '';
-  // Unvollständiger Monat: kein Urteil über die Stunden (fehlende Werktage zählen dort wie Soll), die Warnkarte reicht
-  const headline = monthGaps(p.year, p.month).length
-    ? ''
-    : c.hoursOk
-    ? `<p class="ps-verdict ok">${ICON.check} Die bezahlten Stunden stimmen mit deinen Zetteln überein.</p>${shiftNote}`
-    : `<p class="ps-verdict diff">Auf der Abrechnung gegenüber deinen Zetteln: ${HOUR_KINDS.filter(([k]) => (k === 'ueber' || !c.shifted) && Math.abs(c.hourDiff[k]) >= 0.01)
-        .map(([k, label]) => `${label} ${fmtHDiff(c.hourDiff[k])}`)
-        .join(', ')}.</p>${shiftNote}`;
   return `
-    ${headline}
     <div class="card ps-table">
       <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
       ${hRows}
       ${psRow('Gesamt', fmtH(sum(c.hours) * 60), fmtH(sum(p.hours) * 60), fmtHDiff(sumDiff), Math.abs(sumDiff) >= 0.01, 'ov-sum')}
     </div>
-    ${c.missing.length ? `<p class="footnote">Werktage ohne Stundenzettel: ${c.missing.map((d) => fmtShort(d).slice(0, 6)).join(', ')}</p>` : ''}
     <h2 class="section-title">Lohn</h2>
     <div class="card ps-table">
       <div class="ps-row ov-head"><span>Nach deinen Zetteln</span><span class="ov-n">App</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
@@ -508,9 +489,7 @@ function payslipCompareHTML(p) {
       ${money('Steuern', w.lohnsteuer + w.soli + w.kirchensteuer, p.steuer)}
       ${money('Sozialabgaben', w.kv + w.rv + w.av + w.pv, p.sv)}
       ${money('Netto', w.netto, c.slipNet)}
-    </div>
-    ${verdict}
-    <p class="footnote">Netto heißt hier: alles, was im Monat bei dir ankommt (Abschlag und Auszahlung), ohne den Beitrag zur Betriebsrente.</p>`;
+    </div>`;
 }
 
 /** Eingabefeld für einen Wert der Abrechnung (Zahl mit Komma) */
@@ -556,9 +535,7 @@ function renderPayslip(key) {
       ${psField('Auszahlung', 'auszahlung', p.auszahlung, '€')}
       ${psField('Zusatzbeitrag Krankenkasse', 'kvZusatz', p.kvZusatz, '%')}
     </div>
-    ${(p.fixed || []).length ? `<p class="ps-fixed">Von der App ergänzt, weil auf dem Foto nicht lesbar oder falsch gelesen: ${p.fixed.map((k) => PS_LABELS[k] || k).join(', ')}. Bitte mit der Abrechnung vergleichen.</p>` : ''}
     <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, `Netto − Abschlag − Betriebsrente${p.nettoSonst ? ' ± weitere Be-/Abzüge' : ''} = Auszahlung`)}</ul>
-    <p class="footnote">Die Werte stammen aus der Texterkennung. Vergleiche sie mit deiner Abrechnung und korrigiere sie bei Bedarf – die Prüfungen oben zeigen, ob alles zusammenpasst.</p>
     <button class="list-btn destructive card ps-delete" data-act="payslip-delete" data-key="${key}">Lohnabrechnung löschen</button>`;
 }
 
@@ -1252,9 +1229,8 @@ function renderStats() {
     <div class="card list ps-import">
       <label class="list-btn">Lohnabrechnung einlesen …<input type="file" accept="image/*" data-act-change="payslip-import" hidden></label>
     </div>
-    <p class="footnote">Foto aufnehmen oder aus der Mediathek wählen. Die App liest die Abrechnung und vergleicht sie mit deinen Zetteln. Das Foto bleibt auf dem iPhone und wird nicht gespeichert.</p>
-    <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
-    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Es zählen nur Tage mit Anfangs- und Enduhrzeit oder mit Urlaub, Krank, Feiertag oder Frei. Plus und Minus werden verrechnet. Monate mit Werktagen ohne Eintrag zählen keine Überstunden, bis sie vollständig sind. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
+    <p class="footnote">Foto der Abrechnung – sie wird mit deinen Zetteln verglichen.</p>
+    ${sheets.length ? `<p class="footnote">Überstunden: alles über ${fmtH(Math.round((settings.target * 60) / 5))} pro Werktag. Unvollständige Monate zählen nicht.</p>` : ''}`;
 }
 
 /**
@@ -1759,7 +1735,7 @@ function updatePdfThumb(now = false) {
 
 const pdfThumbHTML = (what, wide = false) => `<button class="pv-thumb ${wide ? 'wide' : ''}" data-act="pdf-preview" aria-label="PDF-Vorschau vergrößern">
       <img id="pdf-thumb" alt="">
-      <span><b>PDF-Vorschau</b><span class="muted">So sieht ${what === 'Zettel' ? 'der Zettel' : 'die Abrechnung'} als PDF aus. Antippen zum Vergrößern.</span></span>
+      <span><b>PDF-Vorschau</b><span class="muted">Antippen zum Vergrößern</span></span>
     </button>`;
 
 /**
@@ -2331,7 +2307,7 @@ function tripBodyHTML(t) {
       <button class="link-btn" data-act="trip-range" data-dir="-1">${ICON.chevronLeft} Woche davor</button>
       <button class="link-btn" data-act="trip-range" data-dir="1">Woche danach ${ICON.chevronRight}</button>
     </div>
-    <p class="footnote">Tippe die Tage an, an denen du unterwegs warst.</p>
+    <p class="footnote">Reisetage antippen.</p>
     ${rows.map(tripDayHTML).join('')}
     ${
       rows.length
@@ -2676,7 +2652,7 @@ function renderSettings() {
       <label class="field"><span>Zusatzbeitrag Krankenkasse</span><input data-s="kvExtra" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.kvExtra)}" enterkeyhint="done"><span class="unit">%</span></label>
       <label class="field"><span>Betriebsrente (dein Beitrag)</span><input data-s="bav" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.bav)}" enterkeyhint="done"><span class="unit">€</span></label>
     </div>
-    <p class="footnote">Damit schätzt die Übersicht dein Netto je Monat: Soll-Stunden mal Stundenlohn, Überstunden mit 25 % Zuschlag, dazu die feste Zulage. Dein Beitrag zur Betriebsrente wird vom Brutto abgezogen, der Zuschuss vom Arbeitgeber ändert dein Netto nicht. Bis zur letzten eingelesenen Lohnabrechnung rechnet die App mit Stundenlohn und Zusatzbeitrag der Abrechnungen (z. B. dem niedrigeren Lohn von früher), danach mit den Werten hier. Die Angaben bleiben auf diesem iPhone.</p>
+    <p class="footnote">Für das geschätzte Netto in der Übersicht.</p>
 
     ${hiddenSuggestionsHTML()}
 
@@ -2691,15 +2667,15 @@ function renderSettings() {
           : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>`
       }
     </div>
-    <p class="footnote">Ort und Unterschrift stehen unten auf der Reisekostenabrechnung. Ohne Unterschrift bleibt das Feld leer.</p>
+    <p class="footnote">Steht unten auf der Reisekostenabrechnung.</p>
 
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
       <label class="list-btn">Sicherung einlesen …<input type="file" multiple accept="${IMPORT_ACCEPT}" data-act-change="backup-import" hidden></label>
     </div>
-    <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
-    <p class="footnote">Einlesen geht auch mit Stundenzetteln als Numbers- oder PDF-Datei, auch mehrere auf einmal.</p>
+    <p class="footnote">Deine Daten sind nur auf diesem iPhone – sichere sie ab und zu.</p>
+    <p class="footnote">Einlesen geht auch mit Numbers- oder PDF-Zetteln.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
 }
 
@@ -2716,7 +2692,7 @@ function hiddenSuggestionsHTML() {
             .join('')}</div>`
         : ''
     }
-    <p class="footnote">Lange auf einen Vorschlag über der Tastatur drücken, um ihn auszublenden.</p>`;
+    <p class="footnote">Lange drücken blendet einen Vorschlag aus.</p>`;
 }
 
 function exportBackup() {
