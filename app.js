@@ -110,7 +110,12 @@ const fieldMissing = (d, r, field) =>
 const dayHasWarning = (d) =>
   canWork(d) &&
   (pauseMissing(d) || d.rows.some((r) => timeWarning(d, r) || fieldMissing(d, r, 'site') || fieldMissing(d, r, 'work')));
-const sheetHasWarning = (s) => sheetActiveDays(s).some((i) => dayHasWarning(s.days[i]));
+/** Leerer Werktag (Mo–Fr, kein Feiertag) in einem gesendeten Zettel – in offenen Zetteln sind leere Tage normal */
+const emptySentWorkday = (s, i) =>
+  !!s.sentAt && i < 5 && !s.days[i].status && !dayStarted(s.days[i]) && !holidayName(sheetDate(s, i));
+/** Warnzeichen für einen Tag des Zettels: unvollständige Angaben oder leerer Werktag im gesendeten Zettel */
+const sheetDayWarning = (s, i) => dayHasWarning(s.days[i]) || emptySentWorkday(s, i);
+const sheetHasWarning = (s) => sheetActiveDays(s).some((i) => sheetDayWarning(s, i));
 const timeWarning = (d, r) =>
   fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || sameStartEnd(r) || rowsOutOfOrder(d).has(r.id) || rowsGapOrOverlap(d).has(r.id);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
@@ -1419,7 +1424,7 @@ function dayBarHTML(s) {
       const total = dayTotal(d);
       const cls = ['db-day', sameDay(sheetDate(s, i), today) ? 'today' : '', d.status ? `status-${d.status} has-status` : ''].join(' ');
       return `<button class="${cls}" data-act="jump" data-day="${i}">
-        <span class="db-name">${WEEKDAYS_SHORT[i]}${dayHasWarning(d) ? `<span class="db-warn">⚠️</span>` : ''}</span>
+        <span class="db-name">${WEEKDAYS_SHORT[i]}${sheetDayWarning(s, i) ? `<span class="db-warn">⚠️</span>` : ''}</span>
         <span class="db-h">${d.status && !holidayWork(d) ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
       </button>`;
     })
