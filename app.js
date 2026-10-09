@@ -1280,7 +1280,8 @@ function overtimeYearHTML(year, months) {
   const last = Math.max(...used, year === now.getFullYear() ? now.getMonth() + 1 : 0);
   const keys = [];
   for (let m = last; m >= Math.min(...used); m--) keys.push(m);
-  const gaps = new Map(keys.map((m) => [m, monthGaps(year, m)]));
+  // Der laufende Monat gilt nie als unvollständig, er bekommt stattdessen „laufender Monat“
+  const gaps = new Map(keys.map((m) => [m, isCurrent(m) ? [] : monthGaps(year, m)]));
   const withPay = hasWage();
   // Netto nur für vollständige Monate und als Prognose für den laufenden Monat
   const pay = new Map(
@@ -1327,7 +1328,7 @@ function overtimeYearHTML(year, months) {
           <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
           ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
         </div>
-        ${gapLine(m, !!slip)}${line}
+        ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m, !!slip)}${line}
       </${slip ? 'a' : 'div'}>`;
     })
     .join('');
