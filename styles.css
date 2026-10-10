@@ -929,7 +929,18 @@ button.nav-title { font-size: 17px; }
 .modal.alert.wide { width: min(380px, calc(100% - 32px)); }
 .alert-buttons.stacked { grid-template-columns: 1fr; }
 .alert-buttons.stacked button + button { border-left: 0; border-top: 0.5px solid var(--sep); }
-.cf .alert-msg { text-align: left; max-height: 52vh; }
+.cf .alert-msg { text-align: left; max-height: 52vh; margin-top: 0; }
+.cf-scroll { position: relative; margin-top: 6px; }
+/* Eigene Scrollleiste rechts, sichtbar solange die Unterschiede scrollen */
+.cf-bar { display: none; position: absolute; top: 0; bottom: 0; right: -10px; width: 3px; border-radius: 2px; background: var(--fill); }
+.cf-scroll.can .cf-bar { display: block; }
+.cf-bar i { position: absolute; top: 0; left: 0; right: 0; border-radius: 2px; background: var(--muted); }
+/* Schalter „Für alle gleich entscheiden“ (wie iOS) */
+.cf-all { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 16px 12px; font-size: 14px; text-align: left; }
+.cf-switch { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--fill); transition: background 0.2s; }
+.cf-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }
+.cf-switch:checked { background: #34c759; }
+.cf-switch:checked::after { transform: translateX(20px); }
 .cf-intro { font-size: 14px; margin: 0 0 10px; text-align: center; }
 .cf-versions { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--fill); }
 .cf-tag { display: inline-block; min-width: 34px; margin-right: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700; text-align: center; color: #fff; }

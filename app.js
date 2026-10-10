@@ -3010,22 +3010,36 @@ function askConflict(c, remaining) {
     const modal = openModal(
       `<div class="alert-body cf">
         <b>${c.trip ? 'Reisekostenabrechnung doppelt' : 'Stundenzettel doppelt'}</b>
-        <div class="alert-msg">
+        <div class="cf-scroll"><div class="alert-msg">
           <p class="cf-intro"><b>${escapeHtml(conflictTitle(c))}</b> gibt es schon, ${allSpelling ? 'nur die Schreibweise ist anders' : 'aber mit Unterschieden'}.</p>
           <div class="cf-versions">
             <div><span class="cf-tag app">App</span>geändert ${fmtStamp(mine.updatedAt)} · ${sum(mine)} · ${sentLabel(mine)}</div>
             <div><span class="cf-tag new">Neu</span>${escapeHtml(c.stampLabel)} ${fmtStamp(c.stamp)} · ${sum(theirs)}${c.backup ? ` · ${sentLabel(theirs)}` : ''}<br><span class="muted">aus ${escapeHtml(c.file)}</span></div>
           </div>
           <ul class="cf-diff">${diff}</ul>
-        </div>
+        </div><div class="cf-bar"><i></i></div></div>
       </div>
+      ${remaining > 1 ? `<label class="cf-all"><span>Für alle ${remaining} gleich entscheiden</span><input type="checkbox" class="cf-switch"></label>` : ''}
       <div class="alert-buttons stacked">
         <button data-c="replace">Neue Fassung übernehmen</button>
         <button data-c="keep" class="strong">Fassung in der App behalten</button>
-        ${remaining > 1 ? `<button data-c="replaceAll">Alle ${remaining} ersetzen</button><button data-c="keepAll">Alle ${remaining} überspringen</button>` : ''}
       </div>`,
       'alert wide'
     );
+    // Scrollleiste rechts, nur wenn die Unterschiede nicht ins Fenster passen (iOS blendet die eigene aus)
+    const msg = modal.querySelector('.alert-msg');
+    const thumb = modal.querySelector('.cf-bar i');
+    const updateBar = () => {
+      const max = msg.scrollHeight - msg.clientHeight;
+      msg.parentElement.classList.toggle('can', max > 1);
+      if (max <= 1) return;
+      const h = Math.max(28, (msg.clientHeight * msg.clientHeight) / msg.scrollHeight);
+      thumb.style.height = `${h}px`;
+      thumb.style.transform = `translateY(${(Math.min(Math.max(msg.scrollTop, 0), max) / max) * (msg.clientHeight - h)}px)`;
+    };
+    msg.addEventListener('scroll', updateBar, { passive: true });
+    updateBar();
+    setTimeout(updateBar, 300);
     let done = false;
     const finish = (v) => {
       if (done) return;
@@ -3036,7 +3050,8 @@ function askConflict(c, remaining) {
     };
     modal.addEventListener('click', (e) => {
       const b = e.target.closest('[data-c]');
-      if (b) finish(b.dataset.c);
+      // Schalter „Für alle gleich entscheiden“ (steht anfangs immer auf aus)
+      if (b) finish(modal.querySelector('.cf-switch')?.checked ? `${b.dataset.c}All` : b.dataset.c);
     });
     // Antippen neben das Fenster: Fassung in der App behalten
     layer.querySelector('.backdrop').addEventListener('click', () => finish('keep'));
