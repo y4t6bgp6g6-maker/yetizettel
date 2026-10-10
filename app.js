@@ -274,12 +274,12 @@ function monthSollMinutes(year, month) {
  * Lohn eines Monats: Soll-Stunden × Stundenlohn, Überstunden mit Zuschlag, feste Zulage; Minusstunden mindern
  * den Grundlohn. Für den laufenden Monat ist das die Prognose (restliche Tage wie Soll). null ohne Stundenlohn.
  */
-function monthPay(year, month, otMin) {
+function monthPay(year, month, otMin, minusMin = 0) {
   if (!hasWage()) return null;
   const wage = monthValue(year, month, 'rate', parseNum(settings.wage));
   // Jede Lohnart wie auf der Abrechnung einzeln auf Cent runden (kaufmännisch, ohne Gleitkomma-Fehler)
   const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
-  const base = cents(((monthSollMinutes(year, month) + Math.min(0, otMin)) / 60) * wage);
+  const base = cents(((monthSollMinutes(year, month) + Math.min(0, otMin) - minusMin) / 60) * wage);
   const ot = cents((Math.max(0, otMin) / 60) * wage * OT_FACTOR);
   return nettoMonat(base + ot + parseNum(settings.bonus), lohnOpts(parseNum(settings.bav), year, month, undefined, slipTarif(year, month)));
 }
@@ -384,25 +384,26 @@ const gapWarningHTML = (p) => {
 /**
  * Stunden eines Monats aus den Zetteln, aufgeteilt wie auf der Lohnabrechnung (in Stunden):
  * Feiertage nach Kalender (Mo–Fr), Urlaub und Krankheit aus den Zetteln, Überstunden wie in der Übersicht,
- * Arbeitsstunden = Soll − Feiertage − Urlaub − Krankheit (Minusstunden ziehen ab). missing: Werktage ohne Zettel.
+ * Arbeitsstunden = Soll − Feiertage − Urlaub − Krankheit − Werktage ohne Eintrag (Minusstunden ziehen ab):
+ * es zählt nur, was eingetragen ist. missing: Werktage ohne Eintrag (wie „Monat unvollständig“).
  */
 function monthHoursSplit(year, month) {
   const byDate = new Map();
   for (const s of sheets) for (const i of sheetActiveDays(s)) byDate.set(isoDate(sheetDate(s, i)), s.days[i]);
   const h = { arbeit: 0, ueber: 0, urlaub: 0, krank: 0, feiertag: 0 };
-  const missing = [];
+  const missing = monthGaps(year, month);
   const day = settings.hoursPerDay;
   for (const d = new Date(year, month - 1, 1); d.getMonth() === month - 1; d.setDate(d.getDate() + 1)) {
     if (d.getDay() === 0 || d.getDay() === 6) continue;
     const entry = byDate.get(isoDate(d));
     if (holidayName(d)) h.feiertag += day;
-    else if (!entry) missing.push(new Date(d));
+    else if (!entry) continue;
     else if (entry.status === 'urlaub') h.urlaub += day;
     else if (entry.status === 'krank') h.krank += day;
   }
   const ot = ((overtimeAccount().get(year) || new Map()).get(month) || 0) / 60;
   h.ueber = Math.max(0, ot);
-  h.arbeit = monthSollMinutes(year, month) / 60 - h.feiertag - h.urlaub - h.krank + Math.min(0, ot);
+  h.arbeit = monthSollMinutes(year, month) / 60 - h.feiertag - h.urlaub - h.krank - missing.length * day + Math.min(0, ot);
   return { hours: h, missing };
 }
 
@@ -422,7 +423,8 @@ function payslipCompare(p) {
   // Unterschiede immer aus Sicht der Abrechnung: −3 h = auf der Abrechnung 3 Stunden weniger als auf den Zetteln
   const hourDiff = Object.fromEntries(HOUR_KINDS.map(([k]) => [k, Math.round(((p.hours[k] || 0) - hours[k]) * 100) / 100]));
   const otMin = (overtimeAccount().get(p.year) || new Map()).get(p.month) || 0;
-  const app = monthPay(p.year, p.month, otMin);
+  // Lohn nur für eingetragene Tage: Werktage ohne Eintrag zählen nicht
+  const app = monthPay(p.year, p.month, otMin, missing.length * settings.hoursPerDay * 60);
   const slipNet = cents((p.netto || 0) - (p.bav || 0)); // Netto inkl. Abschlag, ohne Betriebsrente
   const withSlip = payWithSlipHours(p);
   // Bezahlte Grundstunden (ohne Überstunden) gleich, nur anders verbucht – z. B. Urlaub als Stundenlohn abgerechnet
@@ -458,6 +460,14 @@ function payslipSummary(c) {
 /** Zeile einer Vergleichstabelle: Bezeichnung | Zettel/App | Abrechnung | Unterschied */
 function psRow(label, a, b, diff, bad, cls = '') {
   return `<div class="ps-row ${cls}"><span>${label}</span><span class="ov-n">${a}</span><span class="ov-n">${b}</span><b class="ov-n ${bad ? 'minus' : diff === '' ? '' : 'ok'}">${diff}</b></div>`;
+}
+
+/** Vergleichstabellen: passt ein Betrag nicht in seine Spalte (z. B. +2.780,00 € bei leerem Monat), Tabelle kleiner setzen */
+function fitPsTables() {
+  for (const t of document.querySelectorAll('.ps-table')) {
+    t.classList.remove('tight');
+    if ([...t.querySelectorAll('.ov-n')].some((x) => x.scrollWidth > x.clientWidth + 1)) t.classList.add('tight');
+  }
 }
 
 function payslipCompareHTML(p) {
@@ -546,6 +556,7 @@ function renderPayslip(key) {
     </div>
     <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, `Netto − Abschlag − Betriebsrente${p.nettoSonst ? ' ± weitere Be-/Abzüge' : ''} = Auszahlung`)}</ul>
     <button class="list-btn destructive card ps-delete" data-act="payslip-delete" data-key="${key}">Lohnabrechnung löschen</button>`;
+  fitPsTables();
 }
 
 /** Wert aus dem Eingabefeld übernehmen und den Vergleich neu zeigen (die Felder selbst bleiben stehen) */
@@ -600,6 +611,7 @@ function updatePayslipField(input) {
   if (p.fixed) p.fixed = p.fixed.filter((k) => k !== path);
   savePayslips();
   document.getElementById('ps-compare').innerHTML = payslipCompareHTML(p);
+  fitPsTables();
   const chk = payslipChecks(p);
   const mark = (ok, text) => `<li class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✕'} ${text}</li>`;
   document.getElementById('ps-checks').innerHTML = `${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, `Netto − Abschlag − Betriebsrente${p.nettoSonst ? ' ± weitere Be-/Abzüge' : ''} = Auszahlung`)}`;
