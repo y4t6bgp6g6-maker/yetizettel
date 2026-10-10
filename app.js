@@ -2742,6 +2742,42 @@ function tripDiff(mine, theirs) {
   out.push({ label: 'Ort, Datum', mine: sign(mine), theirs: sign(theirs) });
   return out.filter((x) => x.mine !== x.theirs);
 }
+/** Zwei Fassungen eines Tages wortweise vergleichen: HTML beider Zeilen, abweichende Wörter in <mark> */
+function wordDiffHTML(a, b) {
+  // Wörter; Satzzeichen am Wortende („getauscht;“) und der Strich zwischen zwei Uhrzeiten zählen extra
+  const words = (t) =>
+    t.split(' ').flatMap((w) => (/.[;,]$/.test(w) ? [w.slice(0, -1), w.slice(-1)] : [w]).flatMap((v) => v.split(/(?<=\d)(–)(?=[\d?])|(?<=\?)(–)/).filter(Boolean)));
+  const x = words(a);
+  const y = words(b);
+  // Längste gemeinsame Wortfolge
+  const L = Array.from({ length: x.length + 1 }, () => Array(y.length + 1).fill(0));
+  for (let i = x.length - 1; i >= 0; i--)
+    for (let j = y.length - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const keepA = new Set();
+  const keepB = new Set();
+  for (let i = 0, j = 0; i < x.length && j < y.length; )
+    if (x[i] === y[j]) keepA.add(i++), keepB.add(j++);
+    else if (L[i + 1][j] >= L[i][j + 1]) i++;
+    else j++;
+  const html = (w, keep) =>
+    w
+      .map((t, i) => (i && !/^[;,–]$/.test(t) && w[i - 1] !== '–' ? ' ' : '') + (keep.has(i) ? escapeHtml(t) : `<mark>${escapeHtml(t)}</mark>`))
+      .join('')
+      .replace(/<\/mark>( ?)<mark>/g, '$1');
+  const changed = (w, keep) => w.filter((t, i) => !keep.has(i)).join(' ');
+  return { mine: html(x, keepA), theirs: html(y, keepB), spelling: onlySpelling(changed(x, keepA), changed(y, keepB)) };
+}
+/**
+ * Nur Schreibweise anders (wie beim Tippfehler-Hinweis): gleiche Zahlen, sonst nur Groß-/Kleinschreibung,
+ * Leer-/Satzzeichen oder bei 5–9 Zeichen 1, ab 10 Zeichen 2 Buchstaben
+ */
+function onlySpelling(a, b) {
+  if (a.replace(/\D/g, '') !== b.replace(/\D/g, '')) return false;
+  const ka = searchKey(a);
+  const kb = searchKey(b);
+  const len = Math.max(ka.length, kb.length);
+  return editDistance(ka, kb) <= (len >= 10 ? 2 : len >= 5 ? 1 : 0);
+}
 const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
 /** „12.10.26, 14:03“ */
 const fmtStamp = (ms) => (ms ? `${fmtShort(new Date(ms))}, ${fmtTime(new Date(ms).getHours() * 60 + new Date(ms).getMinutes())}` : 'unbekannt');
@@ -2962,17 +2998,20 @@ function askConflict(c, remaining) {
       ? tripDiff(mine, theirs)
       : sheetDiff(mine, theirs).map((d) => ({ ...d, label: `${WEEKDAYS_SHORT[d.i]} ${fmtDayMonth(sheetDate(mine, d.i))}` }));
     const diff = diffs
-      .map(
-        (d) => `<li><b>${d.label}</b>
-          <span class="cf-line"><span class="cf-tag app">App</span>${escapeHtml(d.mine)}</span>
-          <span class="cf-line"><span class="cf-tag new">Neu</span>${escapeHtml(d.theirs)}</span></li>`
-      )
+      .map((d) => {
+        const w = wordDiffHTML(d.mine, d.theirs);
+        const hint = w.spelling ? '<span class="cf-spell">nur Schreibweise</span>' : '';
+        return `<li><b>${d.label}</b>${hint}
+          <span class="cf-line"><span class="cf-tag app">App</span><span class="cf-txt">${w.mine}</span></span>
+          <span class="cf-line"><span class="cf-tag new">Neu</span><span class="cf-txt">${w.theirs}</span></span></li>`;
+      })
       .join('');
+    const allSpelling = diffs.every((d) => wordDiffHTML(d.mine, d.theirs).spelling);
     const modal = openModal(
       `<div class="alert-body cf">
         <b>${c.trip ? 'Reisekostenabrechnung doppelt' : 'Stundenzettel doppelt'}</b>
         <div class="alert-msg">
-          <p class="cf-intro"><b>${escapeHtml(conflictTitle(c))}</b> gibt es schon, aber mit Unterschieden.</p>
+          <p class="cf-intro"><b>${escapeHtml(conflictTitle(c))}</b> gibt es schon, ${allSpelling ? 'nur die Schreibweise ist anders' : 'aber mit Unterschieden'}.</p>
           <div class="cf-versions">
             <div><span class="cf-tag app">App</span>geändert ${fmtStamp(mine.updatedAt)} · ${sum(mine)} · ${sentLabel(mine)}</div>
             <div><span class="cf-tag new">Neu</span>${escapeHtml(c.stampLabel)} ${fmtStamp(c.stamp)} · ${sum(theirs)}${c.backup ? ` · ${sentLabel(theirs)}` : ''}<br><span class="muted">aus ${escapeHtml(c.file)}</span></div>
