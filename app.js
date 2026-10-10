@@ -2884,6 +2884,16 @@ async function importBackup(input) {
   const conflicts = [];
   let total = 0;
   let tripCount = 0;
+  // Herkunft der in diesem Durchgang neu eingelesenen Zettel/Abrechnungen (Rückfrage zeigt dann „aus Datei …“)
+  const origin = new Map();
+  const known = new Set([...sheets, ...trips]);
+  const markNew = (name) => {
+    for (const x of [...sheets, ...trips])
+      if (!known.has(x)) {
+        known.add(x);
+        origin.set(x, name);
+      }
+  };
   toast(files.length > 1 ? `${files.length} Dateien werden eingelesen …` : 'Wird eingelesen …', 10000);
   for (const file of files) {
     const label = `<b>${escapeHtml(file.name)}</b>`;
@@ -2936,26 +2946,47 @@ async function importBackup(input) {
       }
     } catch (e) {
       lines.push(`${label}: konnte nicht gelesen werden${e && e.message && e.message !== 'format' ? ` (${escapeHtml(e.message)})` : ''}`);
+    } finally {
+      markNew(file.name);
     }
   }
   document.getElementById('toast').classList.remove('show');
-  // Zettel und Abrechnungen mit Unterschieden: selbst entscheiden (einzeln, oder alle ersetzen / alle überspringen)
+  // Zettel und Abrechnungen mit Unterschieden: selbst entscheiden (einzeln, oder für alle gleich).
+  // Mehrere Dateien können dieselbe Woche enthalten: verglichen wird immer mit dem aktuellen Stand,
+  // eine schon abgelehnte Fassung wird nicht noch einmal gefragt.
   let all = null;
+  const rejected = new Map(); // Zettel/Abrechnung → Texte der abgelehnten Fassungen
+  const version = (c, x) =>
+    c.trip
+      ? JSON.stringify([tripRows(x).map(tripDayText), x.place || '', x.signDate || ''])
+      : sheetActiveDays(c.existing).map((i) => dayText(x.days[i] || { rows: [] })).join('\n');
   for (let k = 0; k < conflicts.length; k++) {
     const c = conflicts[k];
-    const choice = all || (await askConflict(c, conflicts.length - k));
+    const title = `<b>${escapeHtml(conflictTitle(c))}</b>`;
+    if (!(c.trip ? tripDiff(c.existing, c.incoming) : sheetDiff(c.existing, c.incoming)).length) {
+      lines.push(`${title}: ${escapeHtml(c.file)} gleich wie die übernommene Fassung`);
+      continue;
+    }
+    if (rejected.get(c.existing)?.has(version(c, c.incoming))) {
+      lines.push(`${title}: Fassung in der App behalten`);
+      continue;
+    }
+    // Stammt die Fassung in der App selbst aus diesem Einlesen, gilt „für alle“ nicht – sonst gewänne still die letzte Datei
+    c.existingFile = origin.get(c.existing);
+    const choice = (!c.existingFile && all) || (await askConflict(c, conflicts.length - k));
     if (choice === 'replaceAll' || choice === 'keepAll') all = choice;
     const replace = choice === 'replace' || choice === 'replaceAll';
     if (replace) {
-      if (c.trip) {
-        replaceTrip(c);
-        tripCount++;
-      } else {
-        replaceSheet(c);
-        total++;
-      }
+      if (c.trip) replaceTrip(c);
+      else replaceSheet(c);
+      // Nur einmal zählen, auch wenn dieselbe Woche aus mehreren Dateien ersetzt wird
+      if (!c.existingFile) c.trip ? tripCount++ : total++;
+      origin.set(c.existing, c.file);
+    } else {
+      if (!rejected.has(c.existing)) rejected.set(c.existing, new Set());
+      rejected.get(c.existing).add(version(c, c.incoming));
     }
-    lines.push(`<b>${escapeHtml(conflictTitle(c))}</b>: ${replace ? 'durch die neue Fassung ersetzt' : 'Fassung in der App behalten'}`);
+    lines.push(`${title}: ${replace ? `Fassung aus ${escapeHtml(c.file)} übernommen` : 'Fassung in der App behalten'}`);
   }
   if (conflicts.some((c) => !c.trip)) saveSheets();
   if (conflicts.some((c) => c.trip)) saveTrips();
@@ -3013,7 +3044,7 @@ function askConflict(c, remaining) {
         <div class="cf-scroll"><div class="alert-msg">
           <p class="cf-intro"><b>${escapeHtml(conflictTitle(c))}</b> gibt es schon, ${allSpelling ? 'nur die Schreibweise ist anders' : 'aber mit Unterschieden'}.</p>
           <div class="cf-versions">
-            <div><span class="cf-tag app">App</span>geändert ${fmtStamp(mine.updatedAt)} · ${sum(mine)} · ${sentLabel(mine)}</div>
+            <div><span class="cf-tag app">App</span>${c.existingFile ? `eben eingelesen · ${sum(mine)}<br><span class="muted">aus ${escapeHtml(c.existingFile)}</span>` : `geändert ${fmtStamp(mine.updatedAt)} · ${sum(mine)} · ${sentLabel(mine)}`}</div>
             <div><span class="cf-tag new">Neu</span>${escapeHtml(c.stampLabel)} ${fmtStamp(c.stamp)} · ${sum(theirs)}${c.backup ? ` · ${sentLabel(theirs)}` : ''}<br><span class="muted">aus ${escapeHtml(c.file)}</span></div>
           </div>
           <ul class="cf-diff">${diff}</ul>
