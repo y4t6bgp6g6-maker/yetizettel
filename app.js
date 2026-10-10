@@ -652,7 +652,7 @@ function renderYear(year) {
   const withApp = cs.every(({ c }) => c.app);
   const sumKinds = (f) => HOUR_KINDS.reduce((t, [k]) => t + f(k), 0);
   const compare = cs.length
-    ? `<h2 class="section-title">Abgerechnete Monate: ${slips.map((p) => MONTHS[p.month - 1].slice(0, 3)).join(', ')}</h2>
+    ? `<h2 class="section-title">Monate in diesem Vergleich: ${slips.map((p) => MONTHS[p.month - 1].slice(0, 3)).join(', ')}</h2>
     <div class="card ps-table">
       <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
       ${HOUR_KINDS.map(([k, label]) => hRow(label, hz(k), ha(k))).join('')}
