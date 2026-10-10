@@ -1035,10 +1035,20 @@ button.nav-title { font-size: 17px; }
 .ps-bar { height: 8px; margin: 16px 0 10px; border-radius: 4px; background: var(--fill); overflow: hidden; }
 .ps-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
 /* Übersicht: Jahr umblättern, Abrechnung in der Monatstabelle */
-.ov-yearnav { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 12px; padding: 4px; border-radius: 22px; background: var(--card); }
-.ov-yearnav-y { display: flex; flex-direction: column; align-items: center; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.ov-yearnav-y small { font-size: 12px; font-weight: 600; color: var(--accent); }
-.ov-yearnav .icon-btn:disabled { opacity: 0.25; }
+/* Jahresleiste: alle Jahre zum Antippen, bei vielen seitlich schiebbar, Rand blendet aus, wo weitere Jahre liegen */
+.ov-segwrap { margin: 4px 0 12px; border-radius: 22px; background: var(--card); }
+.ov-seg { border-radius: 22px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.ov-seg::-webkit-scrollbar { display: none; }
+.ov-seg-in { display: flex; min-width: 100%; width: max-content; padding: 3px; box-sizing: border-box; }
+.ov-seg button { flex: 1 0 78px; height: 38px; border-radius: 19px; font-size: 16px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.ov-seg button.on { background: var(--accent); color: #fff; }
+.ov-seg.single button.on { background: none; color: var(--text); }
+.ov-seg.fade-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 48px); mask-image: linear-gradient(to right, transparent, #000 48px); }
+.ov-seg.fade-r { -webkit-mask-image: linear-gradient(to left, transparent, #000 48px); mask-image: linear-gradient(to left, transparent, #000 48px); }
+.ov-seg.fade-l.fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent);
+}
 /* Monat mit Abrechnung: ein Satz darunter */
 .ov-month { display: block; color: inherit; text-decoration: none; border-top: 0.5px solid var(--sep); }
 .ov-month .ov-row { border-top: 0; }

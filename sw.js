@@ -1,5 +1,5 @@
 // Offline-Cache: Mit Internet wird immer die neueste Version geladen, ohne Internet die gespeicherte.
-const CACHE = 'yetizettel-v38';
+const CACHE = 'yetizettel-v39';
 const ASSETS = [
   './',
   'index.html',

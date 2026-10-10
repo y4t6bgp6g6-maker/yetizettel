@@ -957,6 +957,7 @@ function route() {
   } else if (hash === '#/uebersicht') {
     currentView = 'stats';
     renderStats();
+    placeYearBar();
     syncNav();
     window.scrollTo(0, 0);
   } else {
@@ -1235,6 +1236,31 @@ const OV_ICON = {
 /** In der Übersicht angezeigtes Jahr (null = laufendes Jahr); bleibt beim Zurückkehren erhalten, solange die App offen ist */
 let statsYear = null;
 
+/** Jahresleiste: gewähltes Jahr sichtbar halten (vorherige Lage behalten, nur bei Bedarf weich nachschieben) */
+function placeYearBar(prev) {
+  const bar = document.querySelector('.ov-seg');
+  const on = bar?.querySelector('.on');
+  if (!on) return;
+  bar.onscroll = () => fadeYearBar(bar);
+  requestAnimationFrame(() => fadeYearBar(bar));
+  if (prev == null) {
+    bar.scrollLeft = on.offsetLeft - (bar.clientWidth - on.offsetWidth) / 2;
+    return;
+  }
+  bar.scrollLeft = prev;
+  const left = on.offsetLeft - 8;
+  const right = on.offsetLeft + on.offsetWidth + 8 - bar.clientWidth;
+  if (bar.scrollLeft > left) bar.scrollTo({ left, behavior: 'smooth' });
+  else if (bar.scrollLeft < right) bar.scrollTo({ left: right, behavior: 'smooth' });
+}
+
+/** Rand der Jahresleiste sanft ausblenden, wo noch weitere Jahre liegen */
+function fadeYearBar(bar) {
+  const max = bar.scrollWidth - bar.clientWidth;
+  bar.classList.toggle('fade-l', bar.scrollLeft > 2);
+  bar.classList.toggle('fade-r', bar.scrollLeft < max - 2);
+}
+
 function renderStats() {
   const stats = absenceStats();
   const account = overtimeAccount();
@@ -1245,10 +1271,6 @@ function renderStats() {
   const years = [...stats.keys()].sort((a, b) => b - a);
   if (!years.includes(statsYear)) statsYear = current;
   const y = statsYear;
-  const older = years[years.indexOf(y) + 1];
-  const newer = years[years.indexOf(y) - 1];
-  const yearBtn = (to, label, icon) =>
-    `<button class="icon-btn" data-act="ov-year" data-year="${to}" ${to ? '' : 'disabled'} aria-label="${label}">${icon}</button>`;
   const st = stats.get(y);
   const ot = yearBalance(countedOvertime(y, account.get(y) || new Map()));
   app.innerHTML = `
@@ -1258,11 +1280,9 @@ function renderStats() {
       <span class="nav-btn"></span>
     </header>
     <h1 class="large-title">Übersicht</h1>
-    <div class="ov-yearnav">
-      ${yearBtn(older, 'Voriges Jahr', ICON.chevronLeft)}
-      <span class="ov-yearnav-y">${y}${y === current ? '<small>laufendes Jahr</small>' : ''}</span>
-      ${yearBtn(newer, 'Nächstes Jahr', ICON.chevronRight)}
-    </div>
+    <div class="ov-segwrap"><div class="ov-seg${years.length < 2 ? ' single' : ''}"><div class="ov-seg-in">
+      ${[...years].reverse().map((v) => `<button data-act="ov-year" data-year="${v}" class="${v === y ? 'on' : ''}">${v}</button>`).join('')}
+    </div></div></div>
     <div class="ov-tiles">
       <div class="ov-tile ov-hero">
         <span class="ov-icon ot">${OV_ICON.clock}</span>
@@ -4119,10 +4139,13 @@ document.addEventListener('click', (e) => {
     case 'back':
       goBack();
       break;
-    case 'ov-year':
+    case 'ov-year': {
+      const prev = document.querySelector('.ov-seg')?.scrollLeft;
       statsYear = Number(el.dataset.year);
       renderStats();
+      placeYearBar(prev);
       break;
+    }
     case 'week':
       changeWeek();
       break;
