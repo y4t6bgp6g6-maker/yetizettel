@@ -607,6 +607,93 @@ function renderMonthNoSlip(year, month) {
   fitPsTables();
 }
 
+/** Jahresübersicht: Jahr laut Zetteln (Stunden, Tage, Lohn) und alle Abrechnungen zusammen im Vergleich */
+function renderYear(year) {
+  const now = new Date();
+  const worked = overtimeAccount(true).get(year) || new Map();
+  const months = overtimeAccount().get(year) || new Map();
+  const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
+  const isCurrent = (m) => year === now.getFullYear() && m === now.getMonth() + 1;
+  // Monate wie in der Übersicht: vom ersten mit Zetteln oder Abrechnung bis zum letzten abgeschlossenen (ohne den laufenden)
+  const used = [...Array(12).keys()].map((i) => i + 1).filter((m) => worked.has(m) || payslips[payKey(year, m)]);
+  const lastDone = year < now.getFullYear() ? 12 : year === now.getFullYear() ? now.getMonth() : 0;
+  const range = used.length ? [...Array(12).keys()].map((i) => i + 1).filter((m) => m >= used[0] && m <= lastDone) : [];
+  const missing = range.filter((m) => !worked.has(m));
+  const partial = range.filter((m) => worked.has(m) && monthGaps(year, m).length);
+  const noSlip = range.filter((m) => !payslips[payKey(year, m)]);
+  // Vollständige Monate: nur dort rechnet die App einen Lohn, nur dort wird verglichen
+  const complete = range.filter((m) => worked.has(m) && !monthGaps(year, m).length);
+  const ot = yearBalance(countedOvertime(year, months));
+  const pays = complete.map((m) => monthPay(year, m, months.get(m) || 0)).filter(Boolean);
+  const total = (list, f) => cents(list.reduce((t, x) => t + f(x), 0));
+  const abg = (a) => a.lohnsteuer + a.soli + a.kirchensteuer + a.kv + a.rv + a.av + a.pv;
+  const line = (label, v) => `<div class="yr-row"><span>${label}</span><b>${v}</b></div>`;
+  // Abrechnungen vollständiger Monate zusammen (wie der Satz unter „Gesamt“ in der Übersicht)
+  const slips = complete.map((m) => payslips[payKey(year, m)]).filter(Boolean);
+  const cs = slips.map((p) => ({ p, c: payslipCompare(p) }));
+  const hz = (k) => cs.reduce((t, { c }) => t + (c.hours[k] || 0), 0);
+  const ha = (k) => cs.reduce((t, { p }) => t + (p.hours[k] || 0), 0);
+  const hRow = (label, z, a, cls = '') => psRow(label, fmtH(z * 60), fmtH(a * 60), fmtHDiff(Math.round((a - z) * 100) / 100), cls);
+  const money = (label, z, a) =>
+    psRow(label, z == null ? '–' : fmtMoney(z, true), a == null ? '–' : fmtMoney(a, true), z == null || a == null ? '–' : fmtEuroDiff(cents(a - z)), '', z != null && a != null && Math.abs(a - z) < 0.05);
+  const withApp = cs.every(({ c }) => c.app);
+  const sumKinds = (f) => HOUR_KINDS.reduce((t, [k]) => t + f(k), 0);
+  const compare = cs.length
+    ? `<h2 class="section-title">Abgerechnete Monate: ${slips.map((p) => MONTHS[p.month - 1].slice(0, 3)).join(', ')}</h2>
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${HOUR_KINDS.map(([k, label]) => hRow(label, hz(k), ha(k))).join('')}
+      ${hRow('Gesamt', sumKinds(hz), sumKinds(ha), 'ov-sum')}
+    </div>
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Lohn</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${
+        withApp
+          ? money('Brutto', total(cs, ({ c }) => c.app.brutto), cs.every(({ p }) => p.brutto != null) ? total(cs, ({ p }) => p.brutto) : null) +
+            money('Abgaben', total(cs, ({ c }) => abg(c.app)), cs.every(({ p }) => p.steuer != null && p.sv != null) ? total(cs, ({ p }) => p.steuer + p.sv) : null) +
+            money('Netto', total(cs, ({ c }) => c.app.netto), total(cs, ({ c }) => c.slipNet))
+          : '<div class="ps-row"><span class="muted">Stundenlohn in den Einstellungen eintragen</span></div>'
+      }
+    </div>`
+    : '';
+  // Hinweis oben: unvollständige Monate, Monate ganz ohne Zettel, Monate ohne Abrechnung – in jeder Kombination
+  const names = (list) => {
+    const n = list.map((m) => MONTHS[m - 1]);
+    return n.length > 1 ? `${n.slice(0, -1).join(', ')} und ${n.at(-1)}` : n[0];
+  };
+  // Erst was fehlt (je Art eine Zeile), dann in einem eigenen Absatz, was daraus folgt
+  const facts = [
+    partial.length ? `Unvollständig: ${names(partial)}` : '',
+    missing.length ? `Ohne Stundenzettel: ${names(missing)}` : '',
+    noSlip.length ? `Ohne Lohnabrechnung: ${names(noSlip)}` : '',
+  ].filter(Boolean);
+  const effects = [
+    partial.length || missing.length ? 'Brutto und Netto zählen nur vollständige Monate.' : '',
+    noSlip.length ? 'Der Vergleich zählt nur Monate mit Abrechnung.' : '',
+  ].filter(Boolean);
+  const warn = facts.length
+    ? `<div class="card ps-warncard"><b>⚠️ ${partial.length || missing.length ? 'Jahr unvollständig' : 'Abrechnungen fehlen'}</b><p>${facts.join('<br>')}</p><p>${effects.join(' ')}</p></div>`
+    : '';
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
+      <span class="nav-title"></span>
+      <span class="nav-btn"></span>
+    </header>
+    <h1 class="large-title">${year}</h1>
+    <p class="ps-sub">Jahresübersicht</p>
+    ${warn}${compare}
+    <h2 class="section-title">Laut Zetteln</h2>
+    <div class="card yr-card">
+      ${line('Std. Gesamt', fmtH(yearBalance(worked)))}
+      ${line('davon Überstunden', `<span class="${balanceClass(ot)}">${fmtSigned(ot)}</span>`)}
+      ${line('Tage Urlaub genommen', fmtNum(st.urlaub))}
+      ${line('Krankheitstage', fmtNum(st.krank))}
+      ${pays.length ? line('Brutto', fmtMoney(total(pays, (a) => a.brutto), true)) + line('Netto', fmtMoney(total(pays, (a) => a.netto), true)) : ''}
+    </div>`;
+  fitPsTables();
+}
+
 /** Wert aus dem Eingabefeld übernehmen und den Vergleich neu zeigen (die Felder selbst bleiben stehen) */
 function updatePayslipField(input) {
   const key = location.hash.replace('#/lohn/', '');
@@ -972,6 +1059,7 @@ function route() {
   const m = hash.match(/^#\/zettel\/(.+)$/);
   const tm = hash.match(/^#\/reise\/(.+)$/);
   const lm = hash.match(/^#\/lohn\/(\d{4}-\d{2})$/);
+  const jm = hash.match(/^#\/jahr\/(\d{4})$/);
   if (currentView === 'list') listScroll = window.scrollY;
   if (currentView === 'trip') dropEmptyTrip();
   closeModal(true);
@@ -995,6 +1083,11 @@ function route() {
   } else if (hash === '#/reisekosten') {
     currentView = 'trips';
     renderTripList();
+    syncNav();
+    window.scrollTo(0, 0);
+  } else if (jm) {
+    currentView = 'year';
+    renderYear(Number(jm[1]));
     syncNav();
     window.scrollTo(0, 0);
   } else if (lm) {
@@ -1026,7 +1119,7 @@ window.addEventListener('popstate', () => backTarget && location.hash === routed
  * geht dann weiter zurück, bis die Zielseite erreicht ist. Andere Seiten (Reisekostenabrechnung) wie der Verlauf.
  */
 const BACK_TARGETS = [
-  [/^#\/lohn\//, '#/uebersicht'],
+  [/^#\/(lohn|jahr)\//, '#/uebersicht'],
   [/^#\/(uebersicht|einstellungen|reisekosten|zettel\/.+)$/, '#/'],
 ];
 let backTarget = null;
@@ -1397,9 +1490,9 @@ function overtimeYearHTML(year, months) {
   const ot = keys.reduce((a, m) => a + (gaps.get(m).length ? 0 : months.get(m) || 0), 0);
   const withPay = hasWage();
   /** „3 Werktage ohne Eintrag“ (mit „›“, wenn eine Abrechnung zum Antippen da ist) */
-  const gapLine = (m, link) => {
+  const gapLine = (m) => {
     const n = gaps.get(m).length;
-    return n ? `<div class="ov-verdict gap">${n} ${n === 1 ? 'Werktag' : 'Werktage'} ohne Eintrag${link ? ' ›' : ''}</div>` : '';
+    return n ? `<div class="ov-verdict gap">${n} ${n === 1 ? 'Werktag' : 'Werktage'} ohne Eintrag</div>` : '';
   };
   const cls = 'ov-row';
   /** „3“, „3,5“, „10,25“ Stunden */
@@ -1428,11 +1521,11 @@ function overtimeYearHTML(year, months) {
         // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen +25 % Zuschlag) orange, andere Arten grün
         const off = (k) => Math.abs(c.hourDiff[k]) >= 0.01;
         const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
-        if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">${diffText(d)} ›</div>`;
-        else if (off('ueber')) line = `<div class="ov-verdict neg">Überstunden falsch verbucht${euro} ›</div>`;
+        if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">${diffText(d)}</div>`;
+        else if (off('ueber')) line = `<div class="ov-verdict neg">Überstunden falsch verbucht${euro}</div>`;
         else if (HOUR_KINDS.some(([k]) => off(k)) || !ok(d))
-          line = `<div class="ov-verdict ${d.e < 0 && euro ? 'neg' : 'ok'}">Gesamtstunden stimmen${euro} ›</div>`;
-        else line = `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt ›</div>`;
+          line = `<div class="ov-verdict ${d.e < 0 && euro ? 'neg' : 'ok'}">Gesamtstunden stimmen${euro}</div>`;
+        else line = `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt</div>`;
       }
       return `<a draggable="false" href="#/lohn/${payKey(year, m)}" class="ov-month${gaps.get(m).length ? ' has-gap' : ''}">
         <div class="${cls}">
@@ -1440,7 +1533,8 @@ function overtimeYearHTML(year, months) {
           <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
           ${gaps.get(m).length ? '<b class="ov-n">–</b>' : `<b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>`}
         </div>
-        ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m, true)}${line}
+        ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m)}${line}
+        <span class="ov-chev">${ICON.chevronRight}</span>
       </a>`;
     })
     .join('');
@@ -1465,8 +1559,11 @@ function overtimeYearHTML(year, months) {
   return `<div class="card ov-months">
     <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Std.<br>Gesamt</span><span class="ov-n">davon<br>Überstd.</span></div>
     ${rows}
-    <div class="${cls} ov-sum ov-total"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b></div>
-    ${foot}
+    <a draggable="false" href="#/jahr/${year}" class="ov-totallink">
+      <div class="${cls} ov-sum ov-total"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b></div>
+      ${foot}
+      <span class="ov-chev">${ICON.chevronRight}</span>
+    </a>
   </div>`;
 }
 
