@@ -946,6 +946,7 @@ button.nav-title { font-size: 17px; }
 .cf-tag { display: inline-block; min-width: 34px; margin-right: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700; text-align: center; color: #fff; }
 .cf-tag.app { background: var(--muted); }
 .cf-tag.new { background: var(--accent); }
+.cf-tag.ver { min-width: 22px; background: var(--accent); }
 .cf-diff { list-style: none; margin: 10px 0 0; padding: 0; }
 .cf-diff li { padding: 7px 0; border-top: 0.5px solid var(--sep); }
 .cf-line { display: block; margin-top: 3px; }

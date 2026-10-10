@@ -2743,13 +2743,11 @@ function tripDiff(mine, theirs) {
   return out.filter((x) => x.mine !== x.theirs);
 }
 /** Zwei Fassungen eines Tages wortweise vergleichen: HTML beider Zeilen, abweichende Wörter in <mark> */
-function wordDiffHTML(a, b) {
-  // Wörter; Satzzeichen am Wortende („getauscht;“) und der Strich zwischen zwei Uhrzeiten zählen extra
-  const words = (t) =>
-    t.split(' ').flatMap((w) => (/.[;,]$/.test(w) ? [w.slice(0, -1), w.slice(-1)] : [w]).flatMap((v) => v.split(/(?<=\d)(–)(?=[\d?])|(?<=\?)(–)/).filter(Boolean)));
-  const x = words(a);
-  const y = words(b);
-  // Längste gemeinsame Wortfolge
+/** Wörter eines Tagestexts; Satzzeichen am Wortende („getauscht;“) und der Strich zwischen zwei Uhrzeiten zählen extra */
+const diffWords = (t) =>
+  t.split(' ').flatMap((w) => (/.[;,]$/.test(w) ? [w.slice(0, -1), w.slice(-1)] : [w]).flatMap((v) => v.split(/(?<=\d)(–)(?=[\d?])|(?<=\?)(–)/).filter(Boolean)));
+/** Längste gemeinsame Wortfolge zweier Wortlisten: [Indizes in x, Indizes in y], die gleich bleiben */
+function commonWords(x, y) {
   const L = Array.from({ length: x.length + 1 }, () => Array(y.length + 1).fill(0));
   for (let i = x.length - 1; i >= 0; i--)
     for (let j = y.length - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
@@ -2759,13 +2757,34 @@ function wordDiffHTML(a, b) {
     if (x[i] === y[j]) keepA.add(i++), keepB.add(j++);
     else if (L[i + 1][j] >= L[i][j + 1]) i++;
     else j++;
-  const html = (w, keep) =>
-    w
-      .map((t, i) => (i && !/^[;,–]$/.test(t) && w[i - 1] !== '–' ? ' ' : '') + (keep.has(i) ? escapeHtml(t) : `<mark>${escapeHtml(t)}</mark>`))
-      .join('')
-      .replace(/<\/mark>( ?)<mark>/g, '$1');
+  return [keepA, keepB];
+}
+/** Wortliste als HTML, Wörter außerhalb von keep in <mark> */
+const wordsHTML = (w, keep) =>
+  w
+    .map((t, i) => (i && !/^[;,–]$/.test(t) && w[i - 1] !== '–' ? ' ' : '') + (keep.has(i) ? escapeHtml(t) : `<mark>${escapeHtml(t)}</mark>`))
+    .join('')
+    .replace(/<\/mark>( ?)<mark>/g, '$1');
+/** Zwei Fassungen eines Tages wortweise vergleichen: HTML beider Zeilen, abweichende Wörter in <mark> */
+function wordDiffHTML(a, b) {
+  const x = diffWords(a);
+  const y = diffWords(b);
+  const [keepA, keepB] = commonWords(x, y);
   const changed = (w, keep) => w.filter((t, i) => !keep.has(i)).join(' ');
-  return { mine: html(x, keepA), theirs: html(y, keepB), spelling: onlySpelling(changed(x, keepA), changed(y, keepB)) };
+  return { mine: wordsHTML(x, keepA), theirs: wordsHTML(y, keepB), spelling: onlySpelling(changed(x, keepA), changed(y, keepB)) };
+}
+/** Mehrere Fassungen eines Tages: je Fassung HTML, markiert ist jedes Wort, das in einer anderen Fassung fehlt */
+function wordsMultiHTML(texts) {
+  const words = texts.map(diffWords);
+  return words.map((x, k) => {
+    const keep = new Set(x.keys());
+    words.forEach((y, j) => {
+      if (j === k) return;
+      const [kx] = commonWords(x, y);
+      for (const i of [...keep]) if (!kx.has(i)) keep.delete(i);
+    });
+    return wordsHTML(x, keep);
+  });
 }
 /**
  * Nur Schreibweise anders (wie beim Tippfehler-Hinweis): gleiche Zahlen, sonst nur Groß-/Kleinschreibung,
@@ -2886,21 +2905,26 @@ async function importBackup(input) {
   let tripCount = 0;
   // Herkunft der in diesem Durchgang neu eingelesenen Zettel/Abrechnungen (Rückfrage zeigt dann „aus Datei …“)
   const origin = new Map();
+  const added = new Map(); // erst durch dieses Einlesen angelegt → { file, stamp, stampLabel }
+  const sameFiles = new Map(); // angelegter Zettel → weitere Dateien mit genau dieser Fassung
   const known = new Set([...sheets, ...trips]);
-  const markNew = (name) => {
+  const markNew = (file, json) => {
     for (const x of [...sheets, ...trips])
       if (!known.has(x)) {
         known.add(x);
-        origin.set(x, name);
+        origin.set(x, file.name);
+        added.set(x, json ? { file: file.name, stamp: x.updatedAt, stampLabel: 'geändert' } : { file: file.name, stamp: file.lastModified, stampLabel: 'Datei vom' });
       }
   };
   toast(files.length > 1 ? `${files.length} Dateien werden eingelesen …` : 'Wird eingelesen …', 10000);
   for (const file of files) {
     const label = `<b>${escapeHtml(file.name)}</b>`;
+    let json = false;
     try {
       const buf = await file.arrayBuffer();
       const head = new Uint8Array(buf.slice(0, 1))[0];
       if (/\.json$/i.test(file.name) || head === 0x7b || head === 0x5b) {
+        json = true;
         const r = mergeBackup(JSON.parse(new TextDecoder().decode(buf)));
         total += r.added;
         tripCount += r.tripsAdded;
@@ -2929,10 +2953,14 @@ async function importBackup(input) {
         delete s.importedName;
         if (existing) {
           const range = `${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}`;
-          if (!sheetDiff(existing, s).length) lines.push(`${label}: ${range} schon vorhanden (gleich)`);
-          else {
+          // War die Woche vorher nicht in der App, stammt „vorhanden“ aus einer anderen Datei dieses Einlesens
+          const from = added.get(existing);
+          if (!sheetDiff(existing, s).length) {
+            lines.push(`${label}: ${range} ${from ? `gleich wie in ${escapeHtml(from.file)}` : 'schon vorhanden (gleich)'}`);
+            if (from) sameFiles.set(existing, [...(sameFiles.get(existing) || []), file.name]);
+          } else {
             conflicts.push({ existing, incoming: s, stamp: file.lastModified, stampLabel: 'Datei vom', file: file.name });
-            lines.push(`${label}: ${range} schon vorhanden, mit Unterschieden`);
+            lines.push(`${label}: ${range} ${from ? `auch in ${escapeHtml(from.file)}, mit Unterschieden` : 'schon vorhanden, mit Unterschieden'}`);
           }
           continue;
         }
@@ -2947,22 +2975,49 @@ async function importBackup(input) {
     } catch (e) {
       lines.push(`${label}: konnte nicht gelesen werden${e && e.message && e.message !== 'format' ? ` (${escapeHtml(e.message)})` : ''}`);
     } finally {
-      markNew(file.name);
+      markNew(file, json);
     }
   }
   document.getElementById('toast').classList.remove('show');
-  // Zettel und Abrechnungen mit Unterschieden: selbst entscheiden (einzeln, oder für alle gleich).
-  // Mehrere Dateien können dieselbe Woche enthalten: verglichen wird immer mit dem aktuellen Stand,
+  // Zettel und Abrechnungen mit Unterschieden: selbst entscheiden.
+  // Gab es sie vorher nicht in der App, sondern nur in mehreren Dateien: eine Fassung wählen (ohne „für alle“, das ginge nicht).
+  // Sonst Vergleich mit der App (einzeln oder für alle gleich); verglichen wird immer mit dem aktuellen Stand,
   // eine schon abgelehnte Fassung wird nicht noch einmal gefragt.
-  let all = null;
-  const rejected = new Map(); // Zettel/Abrechnung → Texte der abgelehnten Fassungen
   const version = (c, x) =>
     c.trip
       ? JSON.stringify([tripRows(x).map(tripDayText), x.place || '', x.signDate || ''])
       : sheetActiveDays(c.existing).map((i) => dayText(x.days[i] || { rows: [] })).join('\n');
-  for (let k = 0; k < conflicts.length; k++) {
-    const c = conflicts[k];
+  const items = [];
+  for (const c of conflicts) {
+    const from = added.get(c.existing);
+    if (!from) {
+      items.push(c);
+      continue;
+    }
+    let item = items.find((x) => x.choose && x.existing === c.existing);
+    if (!item) {
+      item = { choose: true, trip: c.trip, existing: c.existing, backup: c.backup, versions: [] };
+      const first = c.trip ? { ...c.existing } : { ...c.existing, days: c.existing.days };
+      item.versions.push({ data: first, files: [from.file, ...(sameFiles.get(c.existing) || [])], stamp: from.stamp, stampLabel: from.stampLabel });
+      items.push(item);
+    }
+    const v = version(c, c.incoming);
+    const same = item.versions.find((x) => version(c, x.data) === v);
+    if (same) same.files.push(c.file);
+    else item.versions.push({ data: c.incoming, files: [c.file], stamp: c.stamp, stampLabel: c.stampLabel });
+  }
+  let all = null;
+  const rejected = new Map(); // Zettel/Abrechnung → Texte der abgelehnten Fassungen
+  for (let k = 0; k < items.length; k++) {
+    const c = items[k];
     const title = `<b>${escapeHtml(conflictTitle(c))}</b>`;
+    if (c.choose) {
+      const pick = await askVersions(c);
+      const v = c.versions[pick];
+      if (pick > 0) c.trip ? replaceTrip({ existing: c.existing, incoming: v.data }) : replaceSheet({ existing: c.existing, incoming: v.data, backup: c.backup });
+      lines.push(`${title}: Fassung aus ${v.files.map(escapeHtml).join(', ')} übernommen`);
+      continue;
+    }
     if (!(c.trip ? tripDiff(c.existing, c.incoming) : sheetDiff(c.existing, c.incoming)).length) {
       lines.push(`${title}: ${escapeHtml(c.file)} gleich wie die übernommene Fassung`);
       continue;
@@ -2973,7 +3028,8 @@ async function importBackup(input) {
     }
     // Stammt die Fassung in der App selbst aus diesem Einlesen, gilt „für alle“ nicht – sonst gewänne still die letzte Datei
     c.existingFile = origin.get(c.existing);
-    const choice = (!c.existingFile && all) || (await askConflict(c, conflicts.length - k));
+    const left = items.slice(k).filter((x) => !x.choose).length;
+    const choice = (!c.existingFile && all) || (await askConflict(c, left));
     if (choice === 'replaceAll' || choice === 'keepAll') all = choice;
     const replace = choice === 'replace' || choice === 'replaceAll';
     if (replace) {
@@ -3019,6 +3075,23 @@ function replaceTrip(c) {
 const conflictTitle = (c) =>
   c.trip ? tripTitle(c.existing) : `${fmtShort(sheetFirstDate(c.existing))} – ${fmtShort(sheetLastDate(c.existing))}`;
 
+/** Scrollleiste rechts in einer Rückfrage, nur wenn die Unterschiede nicht ins Fenster passen (iOS blendet die eigene aus) */
+function scrollBar(modal) {
+  const msg = modal.querySelector('.alert-msg');
+  const thumb = modal.querySelector('.cf-bar i');
+  const updateBar = () => {
+    const max = msg.scrollHeight - msg.clientHeight;
+    msg.parentElement.classList.toggle('can', max > 1);
+    if (max <= 1) return;
+    const h = Math.max(28, (msg.clientHeight * msg.clientHeight) / msg.scrollHeight);
+    thumb.style.height = `${h}px`;
+    thumb.style.transform = `translateY(${(Math.min(Math.max(msg.scrollTop, 0), max) / max) * (msg.clientHeight - h)}px)`;
+  };
+  msg.addEventListener('scroll', updateBar, { passive: true });
+  updateBar();
+  setTimeout(updateBar, 300);
+}
+
 /** Rückfrage bei einem doppelten Zettel (oder einer Abrechnung) mit Unterschieden; Ergebnis: 'keep' | 'replace' | 'keepAll' | 'replaceAll' */
 function askConflict(c, remaining) {
   return new Promise((resolve) => {
@@ -3057,20 +3130,7 @@ function askConflict(c, remaining) {
       </div>`,
       'alert wide'
     );
-    // Scrollleiste rechts, nur wenn die Unterschiede nicht ins Fenster passen (iOS blendet die eigene aus)
-    const msg = modal.querySelector('.alert-msg');
-    const thumb = modal.querySelector('.cf-bar i');
-    const updateBar = () => {
-      const max = msg.scrollHeight - msg.clientHeight;
-      msg.parentElement.classList.toggle('can', max > 1);
-      if (max <= 1) return;
-      const h = Math.max(28, (msg.clientHeight * msg.clientHeight) / msg.scrollHeight);
-      thumb.style.height = `${h}px`;
-      thumb.style.transform = `translateY(${(Math.min(Math.max(msg.scrollTop, 0), max) / max) * (msg.clientHeight - h)}px)`;
-    };
-    msg.addEventListener('scroll', updateBar, { passive: true });
-    updateBar();
-    setTimeout(updateBar, 300);
+    scrollBar(modal);
     let done = false;
     const finish = (v) => {
       if (done) return;
@@ -3086,6 +3146,73 @@ function askConflict(c, remaining) {
     });
     // Antippen neben das Fenster: Fassung in der App behalten
     layer.querySelector('.backdrop').addEventListener('click', () => finish('keep'));
+  });
+}
+
+/** Texte einer Fassung je Zeile der Rückfrage: Map Bezeichnung → Text (Tage des Zettels bzw. der Abrechnung) */
+function versionTexts(c, x) {
+  if (!c.trip) return new Map(sheetActiveDays(c.existing).map((i) => [`${WEEKDAYS_SHORT[i]} ${fmtDayMonth(sheetDate(c.existing, i))}`, dayText(x.days[i] || { rows: [] })]));
+  const m = new Map(
+    tripRows(x).map((r) => {
+      const d = parseDate(r.iso);
+      return [`${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)}`, tripDayText(r)];
+    })
+  );
+  m.set('Ort, Datum', [(x.place || '').trim(), x.signDate ? fmtShort(parseDate(x.signDate)) : ''].filter(Boolean).join(', ') || '–');
+  return m;
+}
+
+/**
+ * Rückfrage, wenn ein Zettel (oder eine Abrechnung) vorher nicht in der App war, aber in mehreren Dateien
+ * unterschiedlich vorkommt: Fassung 1, 2, 3 … nebeneinander, abweichende Wörter markiert. Ergebnis: Index der Fassung.
+ * Kein „für alle“ und kein Schließen neben dem Fenster – jede Woche wird einzeln entschieden.
+ */
+function askVersions(c) {
+  return new Promise((resolve) => {
+    const sum = (x) => (c.trip ? fmtEuro(tripTotal(tripRows(x))) : fmtH(sheetTotal(x)));
+    const texts = c.versions.map((v) => versionTexts(c, v.data));
+    const labels = [...new Set(texts.flatMap((t) => [...t.keys()]))];
+    const diff = labels
+      .map((l) => texts.map((t) => t.get(l) ?? '–'))
+      .map((own, n) => ({ label: labels[n], own }))
+      .filter((d) => new Set(d.own).size > 1)
+      .map(
+        (d) => `<li><b>${d.label}</b>
+          ${wordsMultiHTML(d.own)
+            .map((h, k) => `<span class="cf-line"><span class="cf-tag ver">${k + 1}</span><span class="cf-txt">${h}</span></span>`)
+            .join('')}</li>`
+      )
+      .join('');
+    const modal = openModal(
+      `<div class="alert-body cf">
+        <b>${c.trip ? 'Reisekostenabrechnung mehrfach' : 'Stundenzettel mehrfach'}</b>
+        <div class="cf-scroll"><div class="alert-msg">
+          <p class="cf-intro"><b>${escapeHtml(conflictTitle(c))}</b> gibt es in ${c.versions.length} Fassungen. Welche soll gelten?</p>
+          <div class="cf-versions">
+            ${c.versions
+              .map(
+                (v, k) =>
+                  `<div><span class="cf-tag ver">${k + 1}</span>${escapeHtml(v.stampLabel)} ${fmtStamp(v.stamp)} · ${sum(v.data)}<br><span class="muted">aus ${v.files.map(escapeHtml).join(', ')}</span></div>`
+              )
+              .join('')}
+          </div>
+          <ul class="cf-diff">${diff}</ul>
+        </div><div class="cf-bar"><i></i></div></div>
+      </div>
+      <div class="alert-buttons stacked">
+        ${c.versions.map((v, k) => `<button data-v="${k}">Fassung ${k + 1} übernehmen</button>`).join('')}
+      </div>`,
+      'alert wide'
+    );
+    scrollBar(modal);
+    let done = false;
+    modal.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]');
+      if (!b || done) return;
+      done = true;
+      closeModal();
+      setTimeout(() => resolve(+b.dataset.v), 280);
+    });
   });
 }
 
