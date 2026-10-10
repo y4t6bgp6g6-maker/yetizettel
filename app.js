@@ -524,6 +524,7 @@ function renderPayslip(key) {
       <label class="field"><span>Monat</span><select data-ps="month">${MONTHS.map((m, i) => `<option value="${i + 1}" ${p.month === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       ${psField('Jahr', 'year', p.year, '')}
       <label class="field"><span>Steuertarif</span><select data-ps="tarif"><option value="">wie Jahr (${p.year})</option>${Object.keys(LOHN_JAHRE)
+        .filter((y) => Number(y) !== p.year)
         .map((y) => `<option value="${y}" ${p.tarif === Number(y) ? 'selected' : ''}>${y}</option>`)
         .join('')}</select></label>
       ${psField('Stundenlohn', 'rate', p.rate, '€')}
@@ -552,7 +553,8 @@ function updatePayslipField(input) {
   const v = path === 'month' ? Number(input.value) : input.value.trim() === '' ? null : parseNum(input.value);
   if (path === 'tarif') {
     // Steuertarif: Warnkarte und Vergleich hängen davon ab – Seite neu zeigen
-    p.tarif = v || null;
+    // Tarif des eigenen Jahres ist dasselbe wie „wie Jahr“
+    p.tarif = v && v !== p.year ? v : null;
     savePayslips();
     renderPayslip(key);
     return;
@@ -568,6 +570,7 @@ function updatePayslipField(input) {
     const move = () => {
       p.year = year;
       p.month = month;
+      if (p.tarif === year) p.tarif = null;
       if (p.fixed) p.fixed = p.fixed.filter((k) => k !== path);
       delete payslips[key];
       payslips[nk] = p;
