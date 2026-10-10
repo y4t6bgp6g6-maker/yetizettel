@@ -695,6 +695,7 @@ function markHolidays(s) {
 /** Hinweise vor dem Senden: unvollständige Zeilen, Überschneidungen, fehlende Angaben, leere Werktage */
 function sheetProblems(s) {
   const problems = [];
+  if (pdfCharHint(s.name)) problems.push(`Name: ${pdfCharHint(s.name)}`);
   s.days.forEach((d, i) => {
     if (!sheetIsActive(s, i) || !canWork(d)) return;
     const day = WEEKDAYS[i];
@@ -712,6 +713,10 @@ function sheetProblems(s) {
       if (endBeforeStart(r)) problems.push(`${where}: Ende ${fmtTime(r.end)} liegt vor Beginn ${fmtTime(r.start)}`);
       if (sameStartEnd(r)) problems.push(`${where}: Beginn und Ende sind gleich (${fmtTime(r.start)})`);
       if (missing.length) problems.push(`${where}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
+      for (const [f, label] of [['site', 'Baustelle'], ['work', 'Art der Arbeit']]) {
+        const h = pdfCharHint(r[f]);
+        if (h) problems.push(`${where}, ${label}: ${h}`);
+      }
       if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
     });
     if (rowsOutOfOrder(d).size) problems.push(`${day}: Zeilen nicht in zeitlicher Reihenfolge`);
@@ -2312,6 +2317,7 @@ function tripBodyHTML(t) {
         ? `<h2 class="section-title">Abschluss</h2>
     <div class="card form">
       <label class="field"><span>Ort</span><input data-tp="place" placeholder="z. B. Firmensitz" value="${escapeHtml(t.place || '')}" enterkeyhint="done"></label>
+      ${pdfHintHTML(t.place)}
       <label class="field"><span>Datum</span><input type="date" data-tp="signDate" value="${t.signDate || ''}"></label>
       <div class="field"><span>Unterschrift</span><span class="muted">${sig ? 'aus den Einstellungen' : 'keine (in den Einstellungen)'}</span></div>
     </div>
@@ -2337,7 +2343,9 @@ function tripDayHTML(r) {
         .map((x) => `<p class="trip-issue">⚠️ ${escapeHtml(x)}</p>`)
         .join('')}
       <div class="trip-field"><span class="field-icon">${ICON.pin}</span><textarea class="trip-text" data-t="places" rows="1" maxlength="${TRIP_MAX_LEN}" placeholder="Reiseorte (Baustellen)" autocapitalize="sentences">${escapeHtml(r.places)}</textarea></div>
+      ${pdfHintHTML(r.places)}
       <div class="trip-field"><span class="field-icon">${ICON.tool}</span><textarea class="trip-text" data-t="works" rows="1" maxlength="${TRIP_MAX_LEN}" placeholder="Tätigkeiten" autocapitalize="sentences">${escapeHtml(r.works)}</textarea></div>
+      ${pdfHintHTML(r.works)}
     </div>
     <div class="day-foot">
       <span>Verpflegung</span>
@@ -2469,8 +2477,14 @@ function tripProblems(t) {
     const missing = [r.start == null && 'Beginn', r.end == null && 'Ende', !r.text.trim() && 'Reiseanlass'].filter(Boolean);
     if (missing.length) problems.push(`${day}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
     for (const issue of tripDayIssues(r)) problems.push(`${day}: ${issue}`);
+    for (const [f, label] of [['places', 'Reiseorte'], ['works', 'Tätigkeiten']]) {
+      const h = pdfCharHint(r[f]);
+      if (h) problems.push(`${day}, ${label}: ${h}`);
+    }
   }
   if (!(t.place || '').trim()) problems.push('Ort fehlt');
+  if (pdfCharHint(t.place)) problems.push(`Ort: ${pdfCharHint(t.place)}`);
+  if (pdfCharHint(t.name || settings.name)) problems.push(`Name: ${pdfCharHint(t.name || settings.name)}`);
   if (!(settings.signature && settings.signature.strokes && settings.signature.strokes.length))
     problems.push('Unterschrift fehlt (in den Einstellungen)');
   return problems;
@@ -2633,6 +2647,7 @@ function renderSettings() {
     <h2 class="section-title">Stundenzettel</h2>
     <div class="card form">
       <label class="field"><span>Name</span><input data-s="name" placeholder="Vor- und Nachname" value="${escapeHtml(settings.name)}" autocomplete="name" enterkeyhint="done"></label>
+      ${pdfHintHTML(settings.name)}
     </div>
     <p class="footnote">Steht auf jedem neuen Stundenzettel.</p>
 
@@ -3639,7 +3654,29 @@ function typoFor(field, row) {
   }
   return null;
 }
+/** Hinweis, wenn ein Text Zeichen enthält, die im PDF als „?“ erscheinen; sonst '' */
+function pdfCharHint(text) {
+  const miss = pdfMissingChars(text);
+  if (!miss.length) return '';
+  if (miss.some((ch) => /\p{Script=Cyrillic}/u.test(ch))) return 'Kyrillisch wird im PDF zu „?“';
+  return `„${miss.join(' ')}“ ${miss.length > 1 ? 'werden' : 'wird'} im PDF zu „?“`;
+}
+const pdfHintHTML = (text) => {
+  const h = pdfCharHint(text);
+  return h ? `<div class="typo-hint pdf-hint">⚠️ ${escapeHtml(h)}</div>` : '';
+};
+/** Hinweis unter Feldern außerhalb der Zettel-Zeilen (Reisekosten, Name) nach dem Verlassen neu setzen */
+function refreshPdfHint(input) {
+  const box = input.closest('.trip-field, .field');
+  if (!box) return;
+  const old = box.nextElementSibling;
+  if (old && old.classList.contains('pdf-hint')) old.remove();
+  box.insertAdjacentHTML('afterend', pdfHintHTML(input.value));
+}
 const typoHintHTML = (field, row) => {
+  // Zeichen, die im PDF fehlen, gehen dem Tippfehler-Hinweis vor
+  const pdf = pdfHintHTML(row[field]);
+  if (pdf) return pdf.replace('class="typo-hint pdf-hint"', `class="typo-hint pdf-hint" data-typo="${field}"`);
   const t = typoFor(field, row);
   return t
     ? `<div class="typo-hint" data-typo="${field}">⚠️ Meintest du <button data-act="typo-fix" data-f="${field}" data-v="${escapeHtml(t.suggestion)}" data-p="${escapeHtml(t.part)}">„${escapeHtml(t.suggestion)}“</button>?<button class="typo-x" data-act="typo-ok" data-f="${field}" aria-label="So lassen">✕</button></div>`
@@ -4281,6 +4318,9 @@ document.addEventListener('focusout', (e) => {
   trimWorkInput(e.target);
   if (suggestInput === e.target) hideChips();
   if (e.target.dataset.f && currentSheet()) refreshTypoHint(e.target);
+});
+document.addEventListener('focusout', (e) => {
+  if (e.target.matches('textarea.trip-text, [data-tp="place"], [data-s="name"]')) refreshPdfHint(e.target);
 });
 document.addEventListener('keydown', (e) => {
   // Reisekosten: Return schließt die Tastatur (kein Zeilenumbruch im Kasten)

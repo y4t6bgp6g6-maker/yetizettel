@@ -31,6 +31,16 @@ function pdfString(str) {
   return out;
 }
 
+/** Zeichen, die die PDF-Schrift nicht kennt und als „?“ druckt (z. B. kyrillische Buchstaben, č, ł) */
+function pdfMissingChars(str) {
+  const out = new Set();
+  for (const ch of String(str || '')) {
+    const c = ch.codePointAt(0);
+    if ((c > 0xff || (c >= 0x80 && c < 0xa0)) && WIN_ANSI[c] == null && !/\s/.test(ch)) out.add(ch);
+  }
+  return [...out];
+}
+
 const num = (v) => (Math.round(v * 100) / 100).toString();
 
 class PdfDoc {

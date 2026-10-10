@@ -897,6 +897,8 @@ button.nav-title { font-size: 17px; }
 .typo-hint { display: flex; align-items: center; gap: 4px; margin: 4px 0 2px 24px; font-size: 14px; color: var(--warning); }
 .typo-hint [data-act="typo-fix"] { color: var(--accent); font-weight: 600; }
 .typo-x { margin-left: auto; padding: 4px 6px; color: var(--muted); font-size: 13px; }
+.pdf-hint { display: block; }
+.card.form > .pdf-hint, .trip-day .pdf-hint { margin: 0 16px 8px; }
 .trip-issue { font-size: 13px; margin: 6px 0 0; color: var(--warning); }
 .trip-meal { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .trip-meal input {
