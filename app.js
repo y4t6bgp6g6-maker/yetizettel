@@ -261,11 +261,8 @@ const parseNum = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 const hasWage = () => parseNum(settings.wage) > 0;
-/** Faktor für Überstunden: 1 + Zuschlag aus den Einstellungen (leer = 25 %) */
-const otFactor = () => {
-  const v = String(settings.otPct ?? '').trim();
-  return 1 + (v === '' ? 25 : parseNum(v)) / 100;
-};
+/** Faktor für Überstunden: 1 + Zuschlag aus den Einstellungen (leer = 0 %) */
+const otFactor = () => 1 + parseNum(settings.otPct) / 100;
 /** Bezahlte Soll-Stunden eines Monats (Minuten): jeder Werktag Mo–Fr mit 8 Stunden, Feiertage eingeschlossen */
 function monthSollMinutes(year, month) {
   let days = 0;
@@ -2897,7 +2894,7 @@ function renderSettings() {
       <label class="field"><span>Kinder</span><select data-s="children">${[0, 1, 2, 3, 4, 5]
         .map((k) => `<option value="${k}" ${String(settings.children) === String(k) ? 'selected' : ''}>${k === 5 ? '5 oder mehr' : k}</option>`)
         .join('')}</select></label>
-      <label class="field"><span>Zuschlag Überstunden</span><input data-s="otPct" inputmode="decimal" placeholder="25" value="${escapeHtml(settings.otPct ?? '')}" enterkeyhint="done"><span class="unit">%</span></label>
+      <label class="field"><span>Zuschlag Überstunden</span><input data-s="otPct" inputmode="decimal" placeholder="0" value="${escapeHtml(settings.otPct ?? '')}" enterkeyhint="done"><span class="unit">%</span></label>
       <label class="field"><span>Zusatzbeitrag Krankenkasse</span><input data-s="kvExtra" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.kvExtra)}" enterkeyhint="done"><span class="unit">%</span></label>
       <label class="field"><span>Betriebsrente (dein Beitrag)</span><input data-s="bav" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.bav)}" enterkeyhint="done"><span class="unit">€</span></label>
     </div>
