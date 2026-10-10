@@ -618,7 +618,7 @@ function renderMonthNoSlip(year, month) {
   fitPsTables();
 }
 
-/** Jahresübersicht: Jahr laut Stundenzetteln (Stunden, Tage, Lohn) und alle Abrechnungen zusammen im Vergleich */
+/** Jahresübersicht: Jahr nach Stundenzetteln (Stunden, Tage, Lohn) und alle Abrechnungen zusammen im Vergleich */
 function renderYear(year) {
   const now = new Date();
   const worked = overtimeAccount(true).get(year) || new Map();
@@ -682,7 +682,7 @@ function renderYear(year) {
   ].filter(Boolean);
   const effects = [
     'Der Vergleich zählt nur vollständige Monate mit Stundenzetteln und Lohnabrechnung.',
-    partial.length || missing.length ? 'Unter „Laut Stundenzetteln“ zählen Überstunden und Lohn nur vollständige Monate.' : '',
+    partial.length || missing.length ? 'Unter „Nach Stundenzetteln“ zählen Überstunden und Lohn nur vollständige Monate.' : '',
   ].filter(Boolean);
   const warn = facts.length
     ? `<div class="card ps-warncard"><b>⚠️ ${partial.length || missing.length ? 'Jahr unvollständig' : 'Abrechnungen fehlen'}</b><p>${facts.join('<br>')}</p><p>${effects.join(' ')}</p></div>`
@@ -696,7 +696,7 @@ function renderYear(year) {
     <h1 class="large-title">${year}</h1>
     <p class="ps-sub">Jahresübersicht</p>
     ${warn}${compare}
-    <h2 class="section-title">Laut Stundenzetteln</h2>
+    <h2 class="section-title">Nach Stundenzetteln</h2>
     <div class="card yr-card">
       ${line('Std. Gesamt', fmtH(yearBalance(worked)))}
       ${line('davon Überstunden', `<span class="${balanceClass(ot)}">${fmtSigned(ot)}</span>`)}
