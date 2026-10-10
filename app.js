@@ -1032,6 +1032,7 @@ function collectWorkBySite() {
 const REPORT_KEY = 'yetizettel.reports.v1';
 // items: Scheine; since: Zeitpunkt der neuesten abgeholten Mail; at: letztes Abholen
 let reportStore = { items: [], since: 0, at: 0, ...readJson(REPORT_KEY, {}) };
+if (reportStore.items.some((r) => !r.v)) reportStore.since = 0;
 const reports = () => reportStore.items;
 function saveReports() {
   try {
@@ -1098,11 +1099,19 @@ function parseWorkReport(metaXml, contentXml) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(clean(s || ''));
     return m ? Number(m[1]) * 60 + Number(m[2]) : null;
   };
-  const work = table('Arbeit')
+  const workLines = table('Arbeit')
     .slice(1)
     .map((r) => clean(r.join(' ')))
-    .filter(Boolean)
-    .join(' ');
+    .filter(Boolean);
+  const work = workLines.join(' ');
+  const flat = table('Pauschale')
+    .slice(1)
+    .map((r) => ({ name: clean(r[0] || ''), qty: clean(r[1] || ''), note: clean(r[2] || '') }))
+    .filter((x) => x.name || x.note);
+  const material = table('Material')
+    .slice(1)
+    .map((r) => ({ name: clean(r[0] || ''), qty: clean(r[1] || ''), unit: clean(r[2] || '') }))
+    .filter((x) => x.name);
   const rows = table('Datum')
     .slice(1)
     .filter((r) => /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(clean(r[0] || '')));
@@ -1111,8 +1120,12 @@ function parseWorkReport(metaXml, contentXml) {
   return rows.map((r, i) => {
     const [d, m, y] = clean(r[0]).split('.').map(Number);
     return {
+      v: 2,
       id: rows.length > 1 ? `${no}#${i + 1}` : no,
       no,
+      created: clean(field('create_date')),
+      billName: clean(field('bill_name')),
+      email: clean(field('project_extra1')),
       date: isoDate(new Date(y, m - 1, d)),
       customer,
       street: clean(field('bill_street')),
@@ -1121,8 +1134,14 @@ function parseWorkReport(metaXml, contentXml) {
       start: time(r[2]),
       end: time(r[3]),
       pause: time(r[6]) || 0,
+      travel: time(r[4]),
+      km: clean(r[5] || ''),
+      worked: time(r[7]),
       staff: (r[1] || '').split('\n').map(clean).filter(Boolean),
       work,
+      workLines,
+      flat,
+      material,
     };
   });
 }
@@ -1164,6 +1183,7 @@ async function fetchReports(manual = false) {
   } finally {
     reportFetching = false;
   }
+  if (n && currentView === 'reports') renderReportList();
   if (currentView === 'settings') {
     const el = document.getElementById('report-status');
     if (el) el.textContent = reportStatusText();
@@ -1225,6 +1245,125 @@ function reportWorkOptions(rep, site) {
     .map((x) => x.w);
   const first = (rep.work.split(/(?<=[.!?])\s/)[0] || '').trim().replace(/\.$/, '').slice(0, MAX_LEN.work);
   return [...new Set([...scored.slice(0, 2), first].filter(Boolean))];
+}
+
+// ───────────────────────── Arbeitsscheine: Liste und Detailseite ─────────────────────────
+
+/** Im Stundenzettel eingetragen (Tag des Scheins hat eine Zeile dazu) */
+const reportDone = (rep) => {
+  const day = sheetDayFor(parseDate(rep.date));
+  return !!day && reportEntered(day, rep);
+};
+const reportTimes = (rep) => (rep.start != null ? `${fmtTime(rep.start)}–${rep.end != null ? fmtTime(rep.end) : '?'}` : '');
+const fmtWeekday = (d) => `${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)}`;
+
+function renderReportList() {
+  const groups = new Map();
+  for (const rep of reports()) {
+    const key = rep.date.slice(0, 7);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(rep);
+  }
+  const keys = [...groups.keys()].sort().reverse();
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
+      <span class="nav-title"></span>
+      <span class="nav-btn"></span>
+    </header>
+    <h1 class="large-title">Arbeitsscheine</h1>
+    ${
+      keys.length
+        ? keys
+            .map((k) => {
+              const items = groups.get(k).sort((a, b) => b.date.localeCompare(a.date) || (b.start ?? 0) - (a.start ?? 0));
+              return `<h2 class="section-title">${MONTHS[Number(k.slice(5)) - 1]} ${k.slice(0, 4)}</h2>
+          <div class="card list">${items.map(reportRowHTML).join('')}</div>`;
+            })
+            .join('')
+        : `<div class="empty">
+      <div class="empty-icon">${svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>', 44)}</div>
+      <p><b>Noch keine Arbeitsscheine</b></p>
+    </div>`
+    }`;
+}
+
+function reportRowHTML(rep) {
+  const done = reportDone(rep);
+  const onSite = rep.start != null && rep.end != null ? rep.end - rep.start - (rep.pause || 0) : null;
+  return `<a draggable="false" class="list-row plain" href="#/arbeitsschein/${encodeURIComponent(rep.id)}">
+    <span class="status ${done ? 'sent' : 'ws-open'}">${done ? ICON.check : ''}</span>
+    <span class="list-main">
+      <span class="list-title">${escapeHtml(shortCustomer(rep.customer))}</span>
+      <span class="list-sub">${fmtWeekday(parseDate(rep.date))}${reportTimes(rep) ? ` · ${reportTimes(rep)}` : ''}${rep.city ? ` · ${escapeHtml(rep.city)}` : ''}</span>
+    </span>
+    <span class="list-hours">${onSite != null ? fmtH(onSite) : ''}</span>
+    <span class="list-chevron">${ICON.chevronRight}</span>
+  </a>`;
+}
+
+/** Ganzer Arbeitsschein */
+function renderReport(id) {
+  const rep = reports().find((r) => r.id === id);
+  if (!rep) {
+    location.replace('#/arbeitsscheine');
+    return;
+  }
+  const date = parseDate(rep.date);
+  const done = reportDone(rep);
+  const row = (label, value) => (value ? `<div class="field ws-row"><span>${label}</span><span class="ws-val">${value}</span></div>` : '');
+  const hm = (m) => (m == null ? '' : fmtTime(m));
+  const lines = rep.workLines && rep.workLines.length ? rep.workLines : [rep.work].filter(Boolean);
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
+      <span class="nav-title"></span>
+      <span class="nav-btn"></span>
+    </header>
+    <h1 class="large-title ws-title">${escapeHtml(rep.customer)}</h1>
+    <p class="ws-sub">${escapeHtml([rep.street, [rep.zip, rep.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}${
+      rep.email ? `<br>${escapeHtml(rep.email)}` : ''
+    }</p>
+
+    <h2 class="section-title">Arbeits- und Fahrzeiten</h2>
+    <div class="card form">
+      ${row('Datum', `${WEEKDAYS[(date.getDay() + 6) % 7]}, ${fmtShort(date)}`)}
+      ${row('Mitarbeiter', (rep.staff || []).map(escapeHtml).join('<br>'))}
+      ${row('Arbeitsanfang', hm(rep.start))}
+      ${row('Arbeitsende', hm(rep.end))}
+      ${row('Pause', rep.pause != null ? fmtH(rep.pause) : '')}
+      ${row('Arbeitszeit', rep.worked != null ? fmtH(rep.worked) : '')}
+      ${row('Fahrzeit', rep.travel != null ? fmtH(rep.travel) : '')}
+      ${row('Fahrstrecke', rep.km !== undefined && rep.km !== '' ? `${escapeHtml(rep.km)} km` : '')}
+    </div>
+
+    <h2 class="section-title">Durchgeführte Arbeiten</h2>
+    <div class="card ws-work">${lines.map((l) => `<p>${escapeHtml(l)}</p>`).join('') || '<p class="muted">–</p>'}</div>
+
+    ${
+      rep.flat && rep.flat.length
+        ? `<h2 class="section-title">Pauschalen</h2>
+    <div class="card form">${rep.flat
+      .map((f) => row(escapeHtml([f.name, f.note].filter(Boolean).join(' · ')), escapeHtml(f.qty ? `${f.qty.replace('.', ',')}×` : '')) || `<div class="field ws-row"><span>${escapeHtml(f.name || f.note)}</span></div>`)
+      .join('')}</div>`
+        : ''
+    }
+    ${
+      rep.material && rep.material.length
+        ? `<h2 class="section-title">Material</h2>
+    <div class="card form">${rep.material
+      .map((m) => `<div class="field ws-row"><span>${escapeHtml(m.name)}</span><span class="ws-val">${escapeHtml([m.qty.replace(/\.0$/, '').replace('.', ','), m.unit].filter(Boolean).join(' '))}</span></div>`)
+      .join('')}</div>`
+        : ''
+    }
+
+    <h2 class="section-title">Stundenzettel</h2>
+    <div class="card list">
+      <div class="field ws-row"><span>${done ? `<span class="ws-done">${ICON.check} Eingetragen</span>` : 'Noch nicht eingetragen'}</span></div>
+      <button class="list-btn" data-act="report-sheet" data-id="${escapeHtml(rep.id)}">Stundenzettel öffnen</button>
+      <button class="list-btn destructive" data-act="report-delete" data-id="${escapeHtml(rep.id)}">Arbeitsschein löschen</button>
+    </div>
+    <p class="footnote">Nr. ${escapeHtml(rep.no)}${rep.created ? ` vom ${escapeHtml(rep.created)}` : ''}</p>`;
 }
 
 /** Kapsel neben dem Wochentag: blau, solange ein Schein fehlt; grau mit Haken, wenn alle eingetragen sind */
@@ -1414,6 +1553,7 @@ function route() {
   const tm = hash.match(/^#\/reise\/(.+)$/);
   const lm = hash.match(/^#\/lohn\/(\d{4}-\d{2})$/);
   const jm = hash.match(/^#\/jahr\/(\d{4})$/);
+  const am = hash.match(/^#\/arbeitsschein\/(.+)$/);
   if (currentView === 'list') listScroll = window.scrollY;
   if (currentView === 'trip') dropEmptyTrip();
   closeModal(true);
@@ -1433,6 +1573,16 @@ function route() {
   } else if (hash === '#/einstellungen') {
     currentView = 'settings';
     renderSettings();
+    syncNav();
+    window.scrollTo(0, 0);
+  } else if (hash === '#/arbeitsscheine') {
+    currentView = 'reports';
+    renderReportList();
+    syncNav();
+    window.scrollTo(0, 0);
+  } else if (am) {
+    currentView = 'report';
+    renderReport(decodeURIComponent(am[1]));
     syncNav();
     window.scrollTo(0, 0);
   } else if (hash === '#/reisekosten') {
@@ -1475,6 +1625,8 @@ window.addEventListener('popstate', () => backTarget && location.hash === routed
  */
 const BACK_TARGETS = [
   [/^#\/(lohn|jahr)\//, '#/uebersicht'],
+  [/^#\/arbeitsschein\//, '#/arbeitsscheine'],
+  [/^#\/arbeitsscheine$/, '#/einstellungen'],
   [/^#\/(uebersicht|einstellungen|reisekosten|zettel\/.+)$/, '#/'],
 ];
 let backTarget = null;
@@ -3256,6 +3408,7 @@ function renderSettings() {
     <div class="card form">
       <label class="field"><span>Abholadresse</span><input data-s="reportUrl" placeholder="Link einfügen" value="${escapeHtml(settings.reportUrl || '')}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
       <button class="list-btn" data-act="reports-fetch">Jetzt abholen</button>
+      <button class="list-btn" data-act="reports-open">Alle Arbeitsscheine</button>
     </div>
     <p class="footnote" id="report-status">${reportStatusText()}</p>
 
@@ -4682,6 +4835,23 @@ document.addEventListener('click', (e) => {
     case 'report':
       pickReport(el);
       break;
+    case 'reports-open':
+      location.hash = '#/arbeitsscheine';
+      break;
+    case 'report-sheet': {
+      const rep = reports().find((r) => r.id === el.dataset.id);
+      location.hash = `#/zettel/${encodeURIComponent(openOrCreate(parseDate(rep.date)))}`;
+      break;
+    }
+    case 'report-delete': {
+      const id = el.dataset.id;
+      confirmDialog('Arbeitsschein löschen?', '', 'Löschen', () => {
+        reportStore.items = reportStore.items.filter((r) => r.id !== id);
+        saveReports();
+        goBack();
+      }, true);
+      break;
+    }
     case 'reports-fetch':
       fetchReports(true);
       break;
