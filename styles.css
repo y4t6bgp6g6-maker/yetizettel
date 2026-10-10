@@ -1005,11 +1005,19 @@ button.nav-title { font-size: 17px; }
 .ps-warncard b { color: var(--warning); font-weight: 600; }
 .ps-warncard p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
 .ps-table { margin-top: 10px; }
-.ps-row { display: grid; grid-template-columns: 1fr 76px 84px 78px; align-items: center; min-height: 40px; padding: 0 12px 0 14px; border-top: 0.5px solid var(--sep); font-size: 14px; white-space: nowrap; }
+/* minmax(0, 1fr): ein langer Name („Arbeitsstunden“) schiebt die Zahlenspalten seiner Zeile nicht nach rechts */
+.ps-row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 80px 74px; align-items: center; min-height: 40px; padding: 0 12px 0 14px; border-top: 0.5px solid var(--sep); font-size: 13.5px; white-space: nowrap; }
+.ps-row > :first-child { min-width: 0; padding-right: 6px; white-space: normal; hyphens: auto; -webkit-hyphens: auto; }
 .ps-row.ov-head { min-height: 32px; border-top: 0; font-size: 11px; white-space: normal; }
+/* Spalten „Zettel“ (blau) und „Abrechnung“ (lila) dezent hinterlegt, Überschriften farbig */
+.ps-row > :nth-child(2), .ps-row > :nth-child(3) { align-self: stretch; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
+.ps-row > :nth-child(2) { background: rgba(90, 169, 255, 0.08); }
+.ps-row > :nth-child(3) { background: rgba(179, 140, 255, 0.08); }
+.ps-row.ov-head > :nth-child(2) { color: var(--accent); font-weight: 700; }
+.ps-row.ov-head > :nth-child(3) { color: #b38cff; font-weight: 700; }
 /* Zu breite Beträge (z. B. vierstellige Unterschiede bei leerem Monat): ganze Tabelle kleiner, Zahlenspalten breiter */
-.ps-table.tight .ps-row:not(.ov-head) { grid-template-columns: 1fr 76px 84px 90px; font-size: 12px; }
-.ps-table.tight .ps-row.ov-head { grid-template-columns: 1fr 76px 84px 90px; }
+.ps-table.tight .ps-row:not(.ov-head) { grid-template-columns: minmax(0, 1fr) 78px 78px 84px; font-size: 12px; }
+.ps-table.tight .ps-row.ov-head { grid-template-columns: minmax(0, 1fr) 78px 78px 84px; }
 .ps-row b.ok { color: var(--muted); font-weight: 500; }
 .ps-verdict { display: flex; gap: 8px; align-items: flex-start; margin: 12px 4px; font-size: 15px; line-height: 1.35; }
 .ps-verdict svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
