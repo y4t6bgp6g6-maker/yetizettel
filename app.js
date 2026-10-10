@@ -888,6 +888,7 @@ const ICON = {
   up: svg('<path d="M12 19V5M5 12l7-7 7 7"/>', 22),
   pin: svg('<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>', 15),
   suitcaseSmall: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 16),
+  yearCal: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M7.5 14h2M11 14h2M14.5 14h2M7.5 17.5h2M11 17.5h2"/>', 22),
   suitcase: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 22),
   urlaub: svg('<path d="M12 4a8 8 0 0 1 8 8H4a8 8 0 0 1 8-8z"/><path d="M12 12v7a2 2 0 0 0 4 0"/>', 14),
   krank: svg('<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/>', 14),
@@ -1210,16 +1211,11 @@ const fmtDays = (n) => `${fmtNum(n)} ${n === 1 ? 'Tag' : 'Tage'}`;
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
-  const month = new Date().getMonth() + 1;
-  const pay = monthPay(year, month, (overtimeAccount().get(year) || new Map()).get(month) || 0);
   return `<a draggable="false" class="card stats-card" href="#/uebersicht">
-    <span class="stats-year">${year}</span>
-    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">Urlaub genommen</span></span>
-    <span class="stats-item">${
-      pay
-        ? `<span class="stats-num">${fmtMoney(pay.netto)}</span><span class="stats-label">Netto ${MONTHS[month - 1]} (Prognose)</span>`
-        : `<span class="stats-num muted">– €</span><span class="stats-label">Netto: Lohn eintragen</span>`
-    }</span>
+    <span class="trips-icon">${ICON.yearCal}</span>
+    <span class="stats-item"><span class="trips-title">Übersicht ${year}</span><span class="stats-label">${st.urlaub} ${
+      st.urlaub === 1 ? 'Tag' : 'Tage'
+    } Urlaub genommen</span></span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
 }
@@ -1362,10 +1358,10 @@ function overtimeYearHTML(year, months) {
   // Überstunden nur aus vollständigen Monaten (und dem laufenden)
   const ot = keys.reduce((a, m) => a + (gaps.get(m).length ? 0 : months.get(m) || 0), 0);
   const withPay = hasWage();
-  /** „⚠️ 3 Werktage ohne Eintrag“ (mit „›“, wenn eine Abrechnung zum Antippen da ist) */
+  /** „3 Werktage ohne Eintrag“ (mit „›“, wenn eine Abrechnung zum Antippen da ist) */
   const gapLine = (m, link) => {
     const n = gaps.get(m).length;
-    return n ? `<div class="ov-verdict gap">⚠️ ${n} ${n === 1 ? 'Werktag' : 'Werktage'} ohne Eintrag${link ? ' ›' : ''}</div>` : '';
+    return n ? `<div class="ov-verdict gap">${n} ${n === 1 ? 'Werktag' : 'Werktage'} ohne Eintrag${link ? ' ›' : ''}</div>` : '';
   };
   const cls = 'ov-row';
   /** „3“, „3,5“, „10,25“ Stunden */
@@ -1394,10 +1390,10 @@ function overtimeYearHTML(year, months) {
         // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen +25 % Zuschlag) orange, andere Arten grün
         const off = (k) => Math.abs(c.hourDiff[k]) >= 0.01;
         const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
-        if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">⚠️ ${diffText(d)} ›</div>`;
-        else if (off('ueber')) line = `<div class="ov-verdict neg">⚠️ Überstunden falsch verbucht${euro} ›</div>`;
+        if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">${diffText(d)} ›</div>`;
+        else if (off('ueber')) line = `<div class="ov-verdict neg">Überstunden falsch verbucht${euro} ›</div>`;
         else if (HOUR_KINDS.some(([k]) => off(k)) || !ok(d))
-          line = `<div class="ov-verdict ${d.e < 0 && euro ? 'neg' : 'ok'}">⚠️ Gesamtstunden stimmen${euro} ›</div>`;
+          line = `<div class="ov-verdict ${d.e < 0 && euro ? 'neg' : 'ok'}">Gesamtstunden stimmen${euro} ›</div>`;
         else line = `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt ›</div>`;
       }
       return `<${slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div'} class="ov-month${gaps.get(m).length ? ' has-gap' : ''}">
@@ -1426,7 +1422,7 @@ function overtimeYearHTML(year, months) {
     ? `Insgesamt fehlen ${less}${more ? ` · ${more} mehr` : ''}`
     : more ? `Insgesamt ${more} mehr bezahlt` : withPay ? 'Std. und Netto stimmen insgesamt' : 'Std. stimmen insgesamt';
   const foot = n
-    ? `<div class="ov-verdict ov-sumnote ${short ? 'neg' : 'ok'}">${short ? '⚠️' : ICON.check} ${sumText}</div>`
+    ? `<div class="ov-verdict ov-sumnote ${short ? 'neg' : 'ok'}">${short ? '' : ICON.check}${sumText}</div>`
     : '';
   return `<div class="card ov-months">
     <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Std.<br>Gesamt</span><span class="ov-n">davon<br>Überstd.</span></div>

@@ -632,10 +632,8 @@ textarea.txt { font: inherit; font-size: 16px; line-height: 1.3; color: inherit;
   text-decoration: none;
 }
 .stats-card:active { background: var(--fill); }
-.stats-year { font-weight: 700; font-size: 15px; color: var(--muted); }
 .stats-item { display: flex; flex-direction: column; flex: 1; }
-.stats-num { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.stats-num small, .ov-num small { font-size: 0.6em; font-weight: 600; }
+.ov-num small { font-size: 0.6em; font-weight: 600; }
 .stats-label { font-size: 13px; color: var(--muted); }
 .day-head > div:first-child { white-space: nowrap; }
 .day-actions { flex-wrap: nowrap; }
