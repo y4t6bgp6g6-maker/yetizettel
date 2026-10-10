@@ -1371,10 +1371,10 @@ function overtimeYearHTML(year, months) {
   /** „3“, „3,5“, „10,25“ Stunden */
   const hrs = (h) => fmtDec(Math.abs(h) * 60).replace(/,00$/, '').replace(/(,\d)0$/, '$1');
   const ok = (d) => Math.abs(d.h) < 0.01 && Math.abs(d.e) < 0.5;
-  /** „3 Std. weniger bezahlt · 39 € Netto weniger“ – Abrechnung gegenüber den Zetteln */
+  /** „3 Std. weniger · 39 € Netto weniger“ – Abrechnung gegenüber den Zetteln */
   const diffText = (d) =>
     [
-      Math.abs(d.h) >= 0.01 ? `${hrs(d.h)} Std. ${d.h < 0 ? 'weniger' : 'mehr'} bezahlt` : '',
+      Math.abs(d.h) >= 0.01 ? `${hrs(d.h)} Std. ${d.h < 0 ? 'weniger' : 'mehr'}` : '',
       withPay && Math.abs(d.e) >= 0.5 ? `${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '',
     ]
       .filter(Boolean)

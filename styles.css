@@ -1055,7 +1055,8 @@ button.nav-title { font-size: 17px; }
 .ov-verdict.ok { color: var(--success); }
 .ov-verdict.neg { color: var(--warning); }
 .ov-verdict.gap { color: var(--warning); font-weight: 500; }
-.ov-verdict.now { color: var(--accent); font-size: 12px; font-weight: 600; }
+/* „laufender Monat“ als zart blaue Kapsel */
+.ov-verdict.now { width: fit-content; margin: -4px 16px 10px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); font-size: 12px; font-weight: 600; }
 .ov-verdict + .ov-verdict { margin-top: -4px; }
 /* Monat mit Werktagen ohne Eintrag: schraffiert wie Lücken in der Liste */
 .ov-month.has-gap { background: repeating-linear-gradient(-45deg, transparent 0 7px, color-mix(in srgb, var(--warning) 12%, transparent) 7px 14px); }
