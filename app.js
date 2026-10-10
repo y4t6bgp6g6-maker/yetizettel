@@ -1362,25 +1362,20 @@ function overtimeYearHTML(year, months) {
   // Überstunden nur aus vollständigen Monaten (und dem laufenden)
   const ot = keys.reduce((a, m) => a + (gaps.get(m).length ? 0 : months.get(m) || 0), 0);
   const withPay = hasWage();
-  // Netto nur für vollständige Monate und als Prognose für den laufenden Monat
-  const pay = new Map(
-    keys.map((m) => [m, withPay && (isCurrent(m) || !gaps.get(m).length) ? monthPay(year, m, months.get(m) || 0) : null])
-  );
-  const net = (m) => (pay.get(m) ? `${isCurrent(m) ? '≈ ' : ''}${fmtMoney(pay.get(m).netto)}` : '–');
   /** „⚠️ 3 Werktage ohne Eintrag“ (mit „›“, wenn eine Abrechnung zum Antippen da ist) */
   const gapLine = (m, link) => {
     const n = gaps.get(m).length;
     return n ? `<div class="ov-verdict gap">⚠️ ${n} ${n === 1 ? 'Werktag' : 'Werktage'} ohne Eintrag${link ? ' ›' : ''}</div>` : '';
   };
-  const cls = withPay ? 'ov-row c4' : 'ov-row';
+  const cls = 'ov-row';
   /** „3“, „3,5“, „10,25“ Stunden */
   const hrs = (h) => fmtDec(Math.abs(h) * 60).replace(/,00$/, '').replace(/(,\d)0$/, '$1');
   const ok = (d) => Math.abs(d.h) < 0.01 && Math.abs(d.e) < 0.5;
-  /** „3 Std. weniger bezahlt · 39 € weniger“ – Abrechnung gegenüber den Zetteln */
+  /** „3 Std. weniger bezahlt · 39 € Netto weniger“ – Abrechnung gegenüber den Zetteln */
   const diffText = (d) =>
     [
       Math.abs(d.h) >= 0.01 ? `${hrs(d.h)} Std. ${d.h < 0 ? 'weniger' : 'mehr'} bezahlt` : '',
-      withPay && Math.abs(d.e) >= 0.5 ? `${fmtMoney(Math.abs(d.e))} ${d.e < 0 ? 'weniger' : 'mehr'}` : '',
+      withPay && Math.abs(d.e) >= 0.5 ? `${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '',
     ]
       .filter(Boolean)
       .join(' · ');
@@ -1398,7 +1393,7 @@ function overtimeYearHTML(year, months) {
         sum.e += d.e;
         // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen +25 % Zuschlag) orange, andere Arten grün
         const off = (k) => Math.abs(c.hourDiff[k]) >= 0.01;
-        const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
+        const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
         if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">⚠️ ${diffText(d)} ›</div>`;
         else if (off('ueber')) line = `<div class="ov-verdict neg">⚠️ Überstunden falsch verbucht${euro} ›</div>`;
         else if (HOUR_KINDS.some(([k]) => off(k)) || !ok(d))
@@ -1410,26 +1405,33 @@ function overtimeYearHTML(year, months) {
           <span>${MONTHS[m - 1]}</span>
           <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
           ${gaps.get(m).length ? '<b class="ov-n">–</b>' : `<b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>`}
-          ${withPay ? `<b class="ov-n">${net(m)}</b>` : ''}
         </div>
         ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m, !!slip)}${line}
       </${slip ? 'a' : 'div'}>`;
     })
     .join('');
-  const netSum = keys.reduce((a, m) => a + (pay.get(m) ? pay.get(m).netto : 0), 0);
   // Unter Gesamt nur Abrechnungen vollständiger Monate
   const n = slips.filter((p) => !(gaps.get(p.month) || []).length).length;
-  // Unter Gesamt: Stunden und Netto aller Abrechnungen gegenüber den Zetteln (−5,00 h / −60 €), stimmt alles: Haken
-  const sumState = ok(sum) ? 'ok' : sum.h < 0 || sum.e < 0 ? 'neg' : 'ok';
-  const hVal = Math.abs(sum.h) < 0.01 ? '✓' : `${sum.h < 0 ? '−' : '+'}${fmtDec(Math.abs(sum.h) * 60)} h`;
-  const eVal = Math.abs(sum.e) < 0.5 ? '✓' : `${sum.e < 0 ? '−' : '+'}${fmtMoney(Math.abs(sum.e))}`;
+  // Unter Gesamt ein Satz über alle Abrechnungen: fehlt etwas orange, sonst (gleich oder mehr) grün
+  const short = (withPay && sum.e <= -0.5) || sum.h <= -0.01;
+  // „Insgesamt fehlen 10,5 Std. · 135 € Netto“ bzw. „Insgesamt 2 Std. · 30 € Netto mehr bezahlt“ / „Std. und Netto stimmen insgesamt“
+  const parts = (pick) =>
+    [
+      pick(sum.h, 0.01) ? `${hrs(sum.h)} Std.` : '',
+      withPay && pick(sum.e, 0.5) ? `${fmtMoney(Math.abs(sum.e))} Netto` : '',
+    ].filter(Boolean).join(' · ');
+  const less = parts((v, t) => v <= -t);
+  const more = parts((v, t) => v >= t);
+  const sumText = less
+    ? `Insgesamt fehlen ${less}${more ? ` · ${more} mehr` : ''}`
+    : more ? `Insgesamt ${more} mehr bezahlt` : withPay ? 'Std. und Netto stimmen insgesamt' : 'Std. stimmen insgesamt';
   const foot = n
-    ? `<div class="${cls} ov-sum ov-slipsum ${sumState}"><span class="ov-slipsum-l">Laut Abrechnungen</span><span class="ov-n">${hVal}</span>${withPay ? `<span class="ov-n"></span><span class="ov-n">${eVal}</span>` : '<span class="ov-n"></span>'}</div>`
+    ? `<div class="ov-verdict ov-sumnote ${short ? 'neg' : 'ok'}">${short ? '⚠️' : ICON.check} ${sumText}</div>`
     : '';
   return `<div class="card ov-months">
-    <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">${withPay ? 'Überstd.' : 'Überstunden'}</span>${withPay ? '<span class="ov-n">Netto</span>' : ''}</div>
+    <div class="${cls} ov-head"><span>Monat</span><span class="ov-n">Std.<br>Gesamt</span><span class="ov-n">davon<br>Überstd.</span></div>
     ${rows}
-    <div class="${cls} ov-sum ov-total"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b>${withPay ? `<b class="ov-n">${fmtMoney(netSum)}</b>` : ''}</div>
+    <div class="${cls} ov-sum ov-total"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b></div>
     ${foot}
   </div>`;
 }
