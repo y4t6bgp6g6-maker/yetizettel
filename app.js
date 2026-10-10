@@ -1211,20 +1211,19 @@ const fmtDays = (n) => `${fmtNum(n)} ${n === 1 ? 'Tag' : 'Tage'}`;
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
+  const ot = yearBalance(countedOvertime(year, overtimeAccount().get(year) || new Map()));
   return `<a draggable="false" class="card stats-card" href="#/uebersicht">
     <span class="trips-icon">${ICON.yearCal}</span>
     <span class="stats-item"><span class="trips-title">Übersicht ${year}</span><span class="stats-label">${st.urlaub} ${
       st.urlaub === 1 ? 'Tag' : 'Tage'
     } Urlaub genommen</span></span>
+    <span class="stats-ot"><b class="${balanceClass(ot)}">${fmtSigned(ot)}</b><span class="stats-label">Überstunden</span></span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
 }
 
 const balanceClass = (min) => (min > 0 ? 'plus' : min < 0 ? 'minus' : '');
-/** „+12,50“ mit kleinem „h“ dahinter (große Zahlen auf Karten) */
-const hoursHTML = (min) => `${fmtSigned(min).replace(/ h$/, '')}<small> h</small>`;
 const OV_ICON = {
-  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 18),
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', 18),
   cross: svg('<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/>', 18),
 };
@@ -1268,7 +1267,6 @@ function renderStats() {
   if (!years.includes(statsYear)) statsYear = current;
   const y = statsYear;
   const st = stats.get(y);
-  const ot = yearBalance(countedOvertime(y, account.get(y) || new Map()));
   app.innerHTML = `
     <header class="nav">
       <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
@@ -1280,20 +1278,13 @@ function renderStats() {
       ${[...years].reverse().map((v) => `<button data-act="ov-year" data-year="${v}" class="${v === y ? 'on' : ''}">${v}</button>`).join('')}
     </div></div></div>
     <div class="ov-tiles">
-      <div class="ov-tile ov-hero">
-        <span class="ov-icon ot">${OV_ICON.clock}</span>
-        <span class="ov-label">Überstunden</span>
-        <span class="ov-num ${balanceClass(ot)}">${hoursHTML(ot)}</span>
-      </div>
       <div class="ov-tile">
         <span class="ov-icon vac">${OV_ICON.sun}</span>
-        <span class="ov-num">${fmtNum(st.urlaub)}</span>
-        <span class="ov-label">Urlaub genommen</span>
+        <span class="ov-tile-t"><span class="ov-num">${fmtNum(st.urlaub)}</span><span class="ov-label">${st.urlaub === 1 ? 'Tag' : 'Tage'} Urlaub genommen</span></span>
       </div>
       <div class="ov-tile">
         <span class="ov-icon sick">${OV_ICON.cross}</span>
-        <span class="ov-num">${fmtNum(st.krank)}</span>
-        <span class="ov-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span>
+        <span class="ov-tile-t"><span class="ov-num">${fmtNum(st.krank)}</span><span class="ov-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
       </div>
     </div>
     ${overtimeYearHTML(y, account.get(y) || new Map())}

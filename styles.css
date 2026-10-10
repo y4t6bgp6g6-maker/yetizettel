@@ -955,19 +955,21 @@ button.nav-title { font-size: 17px; }
 
 /* Übersicht: Kacheln je Jahr und Überstunden je Monat */
 .ov-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ov-tile { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 16px; background: var(--card); }
-.ov-hero { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 16px; }
+.ov-tile { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border-radius: 14px; background: var(--card); }
+.ov-tile-t { display: flex; flex-direction: column; min-width: 0; }
+.ov-tile .ov-icon { flex: none; width: 26px; height: 26px; border-radius: 8px; margin: 0; }
+.ov-tile .ov-icon svg { width: 15px; height: 15px; }
+.ov-tile .ov-num { font-size: 17px; }
+.ov-tile .ov-label { font-size: 12px; line-height: 1.2; }
+.stats-ot { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.stats-ot b { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ov-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: #fff; margin-bottom: 6px; }
-.ov-hero .ov-icon { margin: 0; }
-.ov-icon.ot { background: var(--accent); }
 .ov-icon.vac { background: var(--warning); }
 .ov-icon.sick { background: var(--danger); }
 .ov-num { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ov-hero .ov-num { font-size: 30px; }
 .ov-label { font-size: 14px; color: var(--muted); }
-.ov-hero .ov-label { font-size: 17px; font-weight: 600; color: var(--text); }
 .ov-months { margin-top: 10px; border-radius: 16px; }
-.ov-row { display: grid; grid-template-columns: 1fr 1fr 1fr; column-gap: 6px; align-items: center; min-height: 48px; padding: 0 16px; border-top: 0.5px solid var(--sep); font-size: 17px; white-space: nowrap; }
+.ov-row { display: grid; grid-template-columns: 1fr 1fr 1.15fr; column-gap: 10px; align-items: center; min-height: 48px; padding: 0 16px; border-top: 0.5px solid var(--sep); font-size: 17px; white-space: nowrap; }
 .ov-head { min-height: 48px; padding-top: 6px; padding-bottom: 6px; border-top: 0; font-size: 13px; white-space: normal; line-height: 1.2; font-weight: 600; color: var(--muted); }
 .ov-n { text-align: right; font-variant-numeric: tabular-nums; }
 .ov-sum { font-weight: 700; background: var(--fill); }
@@ -1058,7 +1060,7 @@ button.nav-title { font-size: 17px; }
 .ov-verdict + .ov-verdict { margin-top: -4px; }
 /* Monat mit Werktagen ohne Eintrag: schraffiert wie Lücken in der Liste */
 .ov-month.has-gap { background: repeating-linear-gradient(-45deg, transparent 0 7px, color-mix(in srgb, var(--warning) 12%, transparent) 7px 14px); }
-.ov-total { min-height: 54px; border-top: 0.5px solid var(--sep); font-size: 19px; }
+.ov-total { min-height: 52px; border-top: 0.5px solid var(--sep); font-size: 18px; }
 .ov-sumnote { margin-top: 0; padding-top: 0; background: var(--fill); }
 .ps-when { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 .ps-when select { font: inherit; font-size: 17px; padding: 8px 10px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); }
