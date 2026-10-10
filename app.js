@@ -1376,9 +1376,14 @@ function overtimeYearHTML(year, months) {
         const d = { h: HOUR_KINDS.reduce((a, [k]) => a + (slip.hours[k] || 0) - (c.hours[k] || 0), 0), e: c.netDiff || 0 };
         sum.h += d.h;
         sum.e += d.e;
-        line = ok(d)
-          ? `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt ›</div>`
-          : `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">⚠️ ${diffText(d)} ›</div>`;
+        // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen +25 % Zuschlag) orange, andere Arten grün
+        const off = (k) => Math.abs(c.hourDiff[k]) >= 0.01;
+        const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
+        if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">⚠️ ${diffText(d)} ›</div>`;
+        else if (off('ueber')) line = `<div class="ov-verdict neg">⚠️ Überstunden falsch verbucht${euro} ›</div>`;
+        else if (HOUR_KINDS.some(([k]) => off(k)) || !ok(d))
+          line = `<div class="ov-verdict ${d.e < 0 && euro ? 'neg' : 'ok'}">⚠️ Gesamtstunden stimmen${euro} ›</div>`;
+        else line = `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt ›</div>`;
       }
       return `<${slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div'} class="ov-month${gaps.get(m).length ? ' has-gap' : ''}">
         <div class="${cls}">
