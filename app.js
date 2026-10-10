@@ -463,11 +463,22 @@ function psRow(label, a, b, diff, cls = '', neutral = false) {
   return `<div class="ps-row ${cls}"><span>${label}</span><span class="ov-n">${a}</span><span class="ov-n">${b}</span><b class="ov-n ${tone}">${diff}</b></div>`;
 }
 
-/** Vergleichstabellen: passt ein Betrag nicht in seine Spalte (z. B. +2.780,00 € bei leerem Monat), Tabelle kleiner setzen */
+/**
+ * Vergleichstabellen: passt ein Betrag nicht in seine Spalte (z. B. Jahressummen wie 41.100,34 €), Tabelle eine bzw.
+ * zwei Stufen kleiner setzen. Gemessen wird die Textbreite selbst – rechtsbündige Spalten laufen nach links über,
+ * das zeigt scrollWidth nicht an.
+ */
 function fitPsTables() {
+  const tooWide = (x) => {
+    const r = document.createRange();
+    r.selectNodeContents(x);
+    const cs = getComputedStyle(x);
+    return r.getBoundingClientRect().width > x.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2;
+  };
   for (const t of document.querySelectorAll('.ps-table')) {
-    t.classList.remove('tight');
-    if ([...t.querySelectorAll('.ov-n')].some((x) => x.scrollWidth > x.clientWidth + 1)) t.classList.add('tight');
+    t.classList.remove('tight', 'tighter');
+    if ([...t.querySelectorAll('.ov-n')].some(tooWide)) t.classList.add('tight');
+    if ([...t.querySelectorAll('.ov-n')].some(tooWide)) t.classList.add('tighter');
   }
 }
 
@@ -614,10 +625,10 @@ function renderYear(year) {
   const months = overtimeAccount().get(year) || new Map();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
   const isCurrent = (m) => year === now.getFullYear() && m === now.getMonth() + 1;
-  // Monate wie in der Übersicht: vom ersten mit Zetteln oder Abrechnung bis zum letzten abgeschlossenen (ohne den laufenden)
+  // Monate wie in der Übersicht: ab Januar bis zum letzten abgeschlossenen (ohne den laufenden)
   const used = [...Array(12).keys()].map((i) => i + 1).filter((m) => worked.has(m) || payslips[payKey(year, m)]);
   const lastDone = year < now.getFullYear() ? 12 : year === now.getFullYear() ? now.getMonth() : 0;
-  const range = used.length ? [...Array(12).keys()].map((i) => i + 1).filter((m) => m >= used[0] && m <= lastDone) : [];
+  const range = used.length ? [...Array(12).keys()].map((i) => i + 1).filter((m) => m <= lastDone) : [];
   const missing = range.filter((m) => !worked.has(m));
   const partial = range.filter((m) => worked.has(m) && monthGaps(year, m).length);
   const noSlip = range.filter((m) => !payslips[payKey(year, m)]);
@@ -634,8 +645,10 @@ function renderYear(year) {
   const hz = (k) => cs.reduce((t, { c }) => t + (c.hours[k] || 0), 0);
   const ha = (k) => cs.reduce((t, { p }) => t + (p.hours[k] || 0), 0);
   const hRow = (label, z, a, cls = '') => psRow(label, fmtH(z * 60), fmtH(a * 60), fmtHDiff(Math.round((a - z) * 100) / 100), cls);
+  // Jahressummen in ganzen Euro – mit Cent passen fünfstellige Beträge nur in sehr kleiner Schrift in die Spalten
+  const euroDiff = (d) => (Math.abs(d) < 0.5 ? '0 €' : `${d > 0 ? '+' : '−'}${fmtMoney(Math.abs(d))}`);
   const money = (label, z, a) =>
-    psRow(label, z == null ? '–' : fmtMoney(z, true), a == null ? '–' : fmtMoney(a, true), z == null || a == null ? '–' : fmtEuroDiff(cents(a - z)), '', z != null && a != null && Math.abs(a - z) < 0.05);
+    psRow(label, z == null ? '–' : fmtMoney(z), a == null ? '–' : fmtMoney(a), z == null || a == null ? '–' : euroDiff(cents(a - z)), '', z != null && a != null && Math.abs(a - z) < 0.5);
   const withApp = cs.every(({ c }) => c.app);
   const sumKinds = (f) => HOUR_KINDS.reduce((t, [k]) => t + f(k), 0);
   const compare = cs.length
@@ -689,7 +702,14 @@ function renderYear(year) {
       ${line('davon Überstunden', `<span class="${balanceClass(ot)}">${fmtSigned(ot)}</span>`)}
       ${line('Tage Urlaub genommen', fmtNum(st.urlaub))}
       ${line('Krankheitstage', fmtNum(st.krank))}
-      ${pays.length ? line('Brutto', fmtMoney(total(pays, (a) => a.brutto), true)) + line('Netto', fmtMoney(total(pays, (a) => a.netto), true)) : ''}
+      ${
+        pays.length
+          ? line('Brutto', fmtMoney(total(pays, (a) => a.brutto), true)) +
+            line('Steuern', fmtMoney(total(pays, (a) => a.lohnsteuer + a.soli + a.kirchensteuer), true)) +
+            line('Sozialabgaben', fmtMoney(total(pays, (a) => a.kv + a.rv + a.av + a.pv), true)) +
+            line('Netto', fmtMoney(total(pays, (a) => a.netto), true))
+          : ''
+      }
     </div>`;
   fitPsTables();
 }
@@ -1480,10 +1500,10 @@ function overtimeYearHTML(year, months) {
   if (!used.length) return '';
   const now = new Date();
   const isCurrent = (m) => year === now.getFullYear() && m === now.getMonth() + 1;
-  // Alle Monate vom ersten mit Einträgen bis zum laufenden (bzw. letzten), auch solche ganz ohne Zettel
-  const last = Math.max(...used, year === now.getFullYear() ? now.getMonth() + 1 : 0);
+  // Alle Monate des Jahres ab Januar – bis Dezember, im laufenden Jahr bis zum laufenden Monat –, auch solche ganz ohne Zettel
+  const last = year < now.getFullYear() ? 12 : Math.max(...used, year === now.getFullYear() ? now.getMonth() + 1 : 0);
   const keys = [];
-  for (let m = last; m >= Math.min(...used); m--) keys.push(m);
+  for (let m = last; m >= 1; m--) keys.push(m);
   // Der laufende Monat gilt nie als unvollständig, er bekommt stattdessen „laufender Monat“
   const gaps = new Map(keys.map((m) => [m, isCurrent(m) ? [] : monthGaps(year, m)]));
   // Überstunden nur aus vollständigen Monaten (und dem laufenden)
