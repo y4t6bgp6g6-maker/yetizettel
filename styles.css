@@ -1079,6 +1079,11 @@ button.nav-title { font-size: 17px; }
 /* Hinweise unter den Monaten etwas kleiner als der Satz unter Gesamt */
 .ov-month .ov-verdict:not(.now) { font-size: 13px; }
 .ov-month .ov-verdict svg { width: 12px; height: 12px; }
+/* Alle Monate gleich hoch – mit und ohne Hinweis: Hinweis passt mit in die Zeilenhöhe */
+.ov-month { display: flex; flex-direction: column; justify-content: center; min-height: 54px; padding: 6px 0; box-sizing: border-box; }
+.ov-month .ov-row { min-height: 0; line-height: 1.2; }
+.ov-month .ov-verdict { margin-top: 2px; padding-bottom: 0; line-height: 1.2; }
+.ov-month .ov-verdict.now { margin: 3px 16px 0; padding: 1px 8px; font-size: 11px; }
 /* Monat mit Werktagen ohne Eintrag: schraffiert wie Lücken in der Liste */
 .ov-month.has-gap { background: repeating-linear-gradient(-45deg, transparent 0 7px, color-mix(in srgb, var(--warning) 12%, transparent) 7px 14px); }
 .ov-total { min-height: 52px; border-top: 0.5px solid var(--sep); font-size: 18px; }
