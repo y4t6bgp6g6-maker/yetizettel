@@ -523,9 +523,13 @@ function renderPayslip(key) {
     <div class="card form">
       <label class="field"><span>Monat</span><select data-ps="month">${MONTHS.map((m, i) => `<option value="${i + 1}" ${p.month === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       ${psField('Jahr', 'year', p.year, '')}
-      <label class="field"><span>Steuertarif</span><select data-ps="tarif"><option value="">wie Jahr (${p.year})</option>${Object.keys(LOHN_JAHRE)
-        .filter((y) => Number(y) !== p.year)
-        .map((y) => `<option value="${y}" ${p.tarif === Number(y) ? 'selected' : ''}>${y}</option>`)
+      <label class="field"><span>Steuertarif</span><select data-ps="tarif">${[...new Set([p.year, ...Object.keys(LOHN_JAHRE).map(Number)])]
+        .sort((x, y) => y - x)
+        .map((y) =>
+          y === p.year
+            ? `<option value="" ${p.tarif ? '' : 'selected'}>${y} (wie Jahr)</option>`
+            : `<option value="${y}" ${p.tarif === y ? 'selected' : ''}>${y}</option>`
+        )
         .join('')}</select></label>
       ${psField('Stundenlohn', 'rate', p.rate, '€')}
       ${HOUR_KINDS.map(([k, label]) => psField(k === 'krank' ? 'Krankheit (Entgeltfortzahlung)' : label, `hours.${k}`, p.hours[k], 'h')).join('')}
