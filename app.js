@@ -514,7 +514,9 @@ function psField(label, path, value, unit, signed = false) {
 function renderPayslip(key) {
   const p = payslips[key];
   if (!p) {
-    location.replace('#/uebersicht');
+    const [y, m] = key.split('-').map(Number);
+    if (y > 2000 && m >= 1 && m <= 12) renderMonthNoSlip(y, m);
+    else location.replace('#/uebersicht');
     return;
   }
   const chk = payslipChecks(p);
@@ -557,6 +559,51 @@ function renderPayslip(key) {
     </div>
     <ul class="ps-checks" id="ps-checks">${mark(chk.brutto, 'Lohnarten ergeben das Gesamt-Brutto')}${mark(chk.netto, 'Brutto − Steuern − Sozialabgaben = Netto-Verdienst')}${mark(chk.auszahlung, `Netto − Abschlag − Betriebsrente${p.nettoSonst ? ' ± weitere Be-/Abzüge' : ''} = Auszahlung`)}</ul>
     <button class="list-btn destructive card ps-delete" data-act="payslip-delete" data-key="${key}">Lohnabrechnung löschen</button>`;
+  fitPsTables();
+}
+
+/** Monat ohne Lohnabrechnung: Stunden und Lohn laut Zetteln, Spalte „Abrechnung“ leer, dazu Einlesen */
+function renderMonthNoSlip(year, month) {
+  const now = new Date();
+  const current = year === now.getFullYear() && month === now.getMonth() + 1;
+  const { hours, missing } = monthHoursSplit(year, month);
+  // Wie in der Übersicht: der laufende Monat gilt nie als unvollständig, unvollständige Monate rechnen keinen Lohn
+  const gap = !current && missing.length > 0;
+  const otMin = (overtimeAccount().get(year) || new Map()).get(month) || 0;
+  const a = gap ? null : monthPay(year, month, otMin, missing.length * settings.hoursPerDay * 60);
+  const sum = HOUR_KINDS.reduce((t, [k]) => t + (hours[k] || 0), 0);
+  const money = (label, v) => psRow(label, v == null ? '–' : fmtMoney(v, true), '–', '');
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
+      <span class="nav-title"></span>
+      <span class="nav-btn"></span>
+    </header>
+    <h1 class="large-title">${MONTHS[month - 1]} ${year}</h1>
+    <p class="ps-sub">Noch keine Lohnabrechnung</p>
+    ${
+      current
+        ? '<div class="card ps-warncard info"><b>ℹ️ Laufender Monat</b><p>Stunden und Lohn sind bis zum Monatsende hochgerechnet: Werktage ab heute ohne Eintrag zählen mit je 8 Std., Überstunden nur aus eingetragenen Tagen.</p></div>'
+        : gapWarningHTML({ year, month })
+    }
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${HOUR_KINDS.map(([k, label]) => psRow(label, fmtH((hours[k] || 0) * 60), '–', '')).join('')}
+      ${psRow('Gesamt', fmtH(sum * 60), '–', '', 'ov-sum')}
+    </div>
+    <div class="card ps-table">
+      <div class="ps-row ov-head"><span>Lohn</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
+      ${
+        hasWage()
+          ? money('Brutto', a && a.brutto) +
+            money('Abgaben', a && cents(a.lohnsteuer + a.soli + a.kirchensteuer + a.kv + a.rv + a.av + a.pv)) +
+            money('Netto', a && a.netto)
+          : '<div class="ps-row"><span class="muted">Stundenlohn in den Einstellungen eintragen</span></div>'
+      }
+    </div>
+    <div class="card list ps-import">
+      <label class="list-btn">Lohnabrechnung einlesen …<input type="file" accept="image/*" data-act-change="payslip-import" hidden></label>
+    </div>`;
   fitPsTables();
 }
 
@@ -1387,14 +1434,14 @@ function overtimeYearHTML(year, months) {
           line = `<div class="ov-verdict ${d.e < 0 && euro ? 'neg' : 'ok'}">Gesamtstunden stimmen${euro} ›</div>`;
         else line = `<div class="ov-verdict ok">${ICON.check} Abrechnung stimmt ›</div>`;
       }
-      return `<${slip ? `a draggable="false" href="#/lohn/${payKey(year, m)}"` : 'div'} class="ov-month${gaps.get(m).length ? ' has-gap' : ''}">
+      return `<a draggable="false" href="#/lohn/${payKey(year, m)}" class="ov-month${gaps.get(m).length ? ' has-gap' : ''}">
         <div class="${cls}">
           <span>${MONTHS[m - 1]}</span>
           <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
           ${gaps.get(m).length ? '<b class="ov-n">–</b>' : `<b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>`}
         </div>
-        ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m, !!slip)}${line}
-      </${slip ? 'a' : 'div'}>`;
+        ${isCurrent(m) ? '<div class="ov-verdict now">laufender Monat</div>' : gapLine(m, true)}${line}
+      </a>`;
     })
     .join('');
   // Unter Gesamt nur Abrechnungen vollständiger Monate

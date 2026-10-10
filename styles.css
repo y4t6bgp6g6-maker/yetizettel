@@ -955,8 +955,9 @@ button.nav-title { font-size: 17px; }
 
 /* Übersicht: Kacheln je Jahr und Überstunden je Monat */
 .ov-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ov-tile { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border-radius: 14px; background: var(--card); }
-.ov-tile-t { display: flex; flex-direction: column; min-width: 0; }
+.ov-tile { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; row-gap: 2px; padding: 8px 12px; border-radius: 14px; background: var(--card); }
+.ov-tile-t { display: contents; }
+.ov-tile .ov-label { grid-column: 1 / -1; white-space: nowrap; }
 .ov-tile .ov-icon { flex: none; width: 26px; height: 26px; border-radius: 8px; margin: 0; }
 .ov-tile .ov-icon svg { width: 15px; height: 15px; }
 .ov-tile .ov-num { font-size: 17px; }
@@ -1002,6 +1003,8 @@ button.nav-title { font-size: 17px; }
 .ps-warncard { margin-bottom: 14px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
 .ps-warncard b { color: var(--warning); font-weight: 600; }
 .ps-warncard p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.ps-warncard.info { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.ps-warncard.info b { color: var(--accent); }
 .ps-table { margin-top: 10px; }
 /* minmax(0, 1fr): ein langer Name („Arbeitsstunden“) schiebt die Zahlenspalten seiner Zeile nicht nach rechts */
 .ps-row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 80px 74px; align-items: center; min-height: 40px; padding: 0 12px 0 14px; border-top: 0.5px solid var(--sep); font-size: 13.5px; white-space: nowrap; }
