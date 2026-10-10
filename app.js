@@ -281,7 +281,7 @@ function monthPay(year, month, otMin) {
   const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
   const base = cents(((monthSollMinutes(year, month) + Math.min(0, otMin)) / 60) * wage);
   const ot = cents((Math.max(0, otMin) / 60) * wage * OT_FACTOR);
-  return nettoMonat(base + ot + parseNum(settings.bonus), lohnOpts(parseNum(settings.bav), year, month));
+  return nettoMonat(base + ot + parseNum(settings.bonus), lohnOpts(parseNum(settings.bav), year, month, undefined, slipTarif(year, month)));
 }
 /**
  * Wert eines Monats aus den eingelesenen Lohnabrechnungen (Stundenlohn „rate“, Zusatzbeitrag „kvZusatz“):
@@ -347,15 +347,18 @@ const HOUR_KINDS = [
 ];
 const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
 /** Angaben für die Netto-Rechnung eines Monats (Steuertarif des Jahres, Zusatzbeitrag wie auf der Abrechnung) */
-const lohnOpts = (bav, year, month, zusatz) => ({
+const lohnOpts = (bav, year, month, zusatz, tarif) => ({
   klasse: parseNum(settings.taxClass) || 1,
   kirche: !!settings.church,
   kinder: parseNum(settings.children),
   zusatz: zusatz ?? (year ? monthValue(year, month, 'kvZusatz', parseNum(settings.kvExtra)) : parseNum(settings.kvExtra)),
   bav,
-  year,
+  // Steuertarif: von Hand auf der Abrechnung gewählt (z. B. Nachberechnung fürs Vorjahr), sonst das Jahr
+  year: tarif || year,
   month,
 });
+/** Von Hand gewählter Steuertarif der Abrechnung eines Monats, sonst null */
+const slipTarif = (year, month) => payslips[payKey(year, month)]?.tarif || null;
 /** Steuertarif eines Jahres fehlt in der App: Hinweistext, sonst null */
 function tarifWarning(year) {
   if (!year || lohnJahrBekannt(year)) return null;
@@ -410,7 +413,7 @@ function payWithSlipHours(p) {
   const brutto =
     cents(h.arbeit * rate) + cents(h.urlaub * rate) + cents(h.feiertag * rate) + cents(h.krank * rate) +
     cents((h.sonst || 0) * rate) + cents(h.ueber * rate * OT_FACTOR) + (p.zulage || 0);
-  return nettoMonat(cents(brutto), lohnOpts(p.bav || 0, p.year, p.month, p.kvZusatz));
+  return nettoMonat(cents(brutto), lohnOpts(p.bav || 0, p.year, p.month, p.kvZusatz, p.tarif));
 }
 
 /** Vergleich einer Abrechnung mit den Zetteln und der Lohnrechnung der App */
@@ -513,13 +516,16 @@ function renderPayslip(key) {
     </header>
     <h1 class="large-title">${MONTHS[p.month - 1]} ${p.year}</h1>
     <p class="ps-sub">Lohnabrechnung im Vergleich</p>
-    ${gapWarningHTML(p)}${tarifWarningHTML(p.year)}
+    ${gapWarningHTML(p)}${tarifWarningHTML(p.tarif || p.year)}
     <div id="ps-compare">${payslipCompareHTML(p)}</div>
 
     <h2 class="section-title">Werte der Abrechnung</h2>
     <div class="card form">
       <label class="field"><span>Monat</span><select data-ps="month">${MONTHS.map((m, i) => `<option value="${i + 1}" ${p.month === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       ${psField('Jahr', 'year', p.year, '')}
+      <label class="field"><span>Steuertarif</span><select data-ps="tarif"><option value="">wie Jahr (${p.year})</option>${Object.keys(LOHN_JAHRE)
+        .map((y) => `<option value="${y}" ${p.tarif === Number(y) ? 'selected' : ''}>${y}</option>`)
+        .join('')}</select></label>
       ${psField('Stundenlohn', 'rate', p.rate, '€')}
       ${HOUR_KINDS.map(([k, label]) => psField(k === 'krank' ? 'Krankheit (Entgeltfortzahlung)' : label, `hours.${k}`, p.hours[k], 'h')).join('')}
       ${psField('Zulagen', 'zulage', p.zulage, '€')}
@@ -544,21 +550,47 @@ function updatePayslipField(input) {
   if (!p) return;
   const path = input.dataset.ps;
   const v = path === 'month' ? Number(input.value) : input.value.trim() === '' ? null : parseNum(input.value);
-  if (path.startsWith('hours.')) p.hours[path.slice(6)] = v || 0;
-  else p[path] = v;
-  // Von Hand eingetragen: gilt nicht mehr als ergänzt
-  if (p.fixed) p.fixed = p.fixed.filter((k) => k !== path);
+  if (path === 'tarif') {
+    // Steuertarif: Warnkarte und Vergleich hängen davon ab – Seite neu zeigen
+    p.tarif = v || null;
+    savePayslips();
+    renderPayslip(key);
+    return;
+  }
   if (path === 'month' || path === 'year') {
-    // Anderer Monat: unter dem neuen Schlüssel speichern
-    const nk = payKey(p.year, p.month);
-    if (nk !== key && p.year > 2000) {
+    // Anderer Monat: unter dem neuen Schlüssel speichern – eine vorhandene Abrechnung dort nur nach Rückfrage ersetzen
+    const year = path === 'year' ? v : p.year;
+    const month = path === 'month' ? v : p.month;
+    const undo = () => (input.value = path === 'year' ? p.year : p.month);
+    if (!(year > 2000 && year < 2100)) return undo();
+    const nk = payKey(year, month);
+    if (nk === key) return;
+    const move = () => {
+      p.year = year;
+      p.month = month;
+      if (p.fixed) p.fixed = p.fixed.filter((k) => k !== path);
       delete payslips[key];
       payslips[nk] = p;
       savePayslips();
       location.replace(`#/lohn/${nk}`);
-      return;
-    }
+    };
+    if (payslips[nk])
+      confirmDialog(
+        `${MONTHS[month - 1]} ${year} ersetzen?`,
+        `Für ${MONTHS[month - 1]} ${year} gibt es schon eine Lohnabrechnung. Sie wird durch diese ersetzt.`,
+        'Ersetzen',
+        move,
+        true,
+        'Abbrechen',
+        undo
+      );
+    else move();
+    return;
   }
+  if (path.startsWith('hours.')) p.hours[path.slice(6)] = v || 0;
+  else p[path] = v;
+  // Von Hand eingetragen: gilt nicht mehr als ergänzt
+  if (p.fixed) p.fixed = p.fixed.filter((k) => k !== path);
   savePayslips();
   document.getElementById('ps-compare').innerHTML = payslipCompareHTML(p);
   const chk = payslipChecks(p);
