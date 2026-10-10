@@ -995,6 +995,7 @@ button.nav-title { font-size: 17px; }
 
 /* Lohnabrechnungen */
 .ps-import { margin-top: 10px; }
+.ov-months + .ps-import, .ps-table + .ps-import { margin-top: 22px; }
 .ps-dot { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 700; font-size: 15px; color: #fff; }
 .ps-dot svg { width: 14px; height: 14px; }
 .ps-dot.ok { background: var(--success); }
@@ -1075,6 +1076,9 @@ button.nav-title { font-size: 17px; }
 /* „laufender Monat“ als zart blaue Kapsel */
 .ov-verdict.now { width: fit-content; margin: -4px 16px 10px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); font-size: 12px; font-weight: 600; }
 .ov-verdict + .ov-verdict { margin-top: -4px; }
+/* Hinweise unter den Monaten etwas kleiner als der Satz unter Gesamt */
+.ov-month .ov-verdict:not(.now) { font-size: 13px; }
+.ov-month .ov-verdict svg { width: 12px; height: 12px; }
 /* Monat mit Werktagen ohne Eintrag: schraffiert wie Lücken in der Liste */
 .ov-month.has-gap { background: repeating-linear-gradient(-45deg, transparent 0 7px, color-mix(in srgb, var(--warning) 12%, transparent) 7px 14px); }
 .ov-total { min-height: 52px; border-top: 0.5px solid var(--sep); font-size: 18px; }
