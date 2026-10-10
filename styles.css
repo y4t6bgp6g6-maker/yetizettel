@@ -1019,12 +1019,13 @@ button.nav-title { font-size: 17px; }
 .ps-table.tight .ps-row:not(.ov-head) { grid-template-columns: minmax(0, 1fr) 78px 78px 84px; font-size: 12px; }
 .ps-table.tight .ps-row.ov-head { grid-template-columns: minmax(0, 1fr) 78px 78px 84px; }
 .ps-row b.ok { color: var(--muted); font-weight: 500; }
+.ps-row b.plus { color: var(--success); }
+.ps-row b.minus { color: var(--danger); }
 .ps-verdict { display: flex; gap: 8px; align-items: flex-start; margin: 12px 4px; font-size: 15px; line-height: 1.35; }
 .ps-verdict svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
 .ps-verdict.ok { color: var(--success); }
 .ps-verdict.diff { color: var(--danger); }
 .ps-verdict.shift { color: var(--warning); }
-.ps-row.shift b { color: var(--warning); }
 .ps-fixed { margin: 10px 4px 0; font-size: 14px; line-height: 1.4; color: var(--warning); }
 .ps-checks { list-style: none; margin: 10px 4px 0; padding: 0; font-size: 14px; line-height: 1.6; }
 .ps-checks .ok { color: var(--success); }

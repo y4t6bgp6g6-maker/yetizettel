@@ -457,9 +457,10 @@ function payslipSummary(c) {
   return { ok: false, text: parts.join(' · ') };
 }
 
-/** Zeile einer Vergleichstabelle: Bezeichnung | Zettel/App | Abrechnung | Unterschied */
-function psRow(label, a, b, diff, bad, cls = '') {
-  return `<div class="ps-row ${cls}"><span>${label}</span><span class="ov-n">${a}</span><span class="ov-n">${b}</span><b class="ov-n ${bad ? 'minus' : diff === '' ? '' : 'ok'}">${diff}</b></div>`;
+/** Zeile einer Vergleichstabelle: Bezeichnung | Zettel/App | Abrechnung | Unterschied (+ grün, − rot, 0 grau) */
+function psRow(label, a, b, diff, cls = '', neutral = false) {
+  const tone = neutral ? 'ok' : diff.startsWith('+') ? 'plus' : diff.startsWith('−') ? 'minus' : diff === '' || diff === '–' ? '' : 'ok';
+  return `<div class="ps-row ${cls}"><span>${label}</span><span class="ov-n">${a}</span><span class="ov-n">${b}</span><b class="ov-n ${tone}">${diff}</b></div>`;
 }
 
 /** Vergleichstabellen: passt ein Betrag nicht in seine Spalte (z. B. +2.780,00 € bei leerem Monat), Tabelle kleiner setzen */
@@ -474,16 +475,14 @@ function payslipCompareHTML(p) {
   const c = payslipCompare(p);
   const hRows = HOUR_KINDS.map(([k, label]) => {
     const d = c.hourDiff[k];
-    const off = Math.abs(d) >= 0.01;
-    // Nur anders verbucht (Summe gleich): orange statt rot
-    return psRow(label, fmtH(c.hours[k] * 60), fmtH((p.hours[k] || 0) * 60), fmtHDiff(d), off && !(c.shifted && k !== 'ueber'), off && c.shifted && k !== 'ueber' ? 'shift' : '');
+    return psRow(label, fmtH(c.hours[k] * 60), fmtH((p.hours[k] || 0) * 60), fmtHDiff(d));
   }).join('');
   const sum = (o) => HOUR_KINDS.reduce((a, [k]) => a + (o[k] || 0), 0);
   const sumDiff = Math.round((sum(p.hours) - sum(c.hours)) * 100) / 100;
   const money = (label, appV, slipV) =>
     appV == null || slipV == null
-      ? psRow(label, appV == null ? '–' : fmtMoney(appV, true), slipV == null ? '–' : fmtMoney(slipV, true), appV == null ? '–' : '', false)
-      : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(slipV - appV)), Math.abs(appV - slipV) >= 0.05);
+      ? psRow(label, appV == null ? '–' : fmtMoney(appV, true), slipV == null ? '–' : fmtMoney(slipV, true), appV == null ? '–' : '')
+      : psRow(label, fmtMoney(appV, true), fmtMoney(slipV, true), fmtEuroDiff(cents(slipV - appV)), '', Math.abs(appV - slipV) < 0.05);
   // Prüfung der Lohnrechnung: mit den Stunden der Abrechnung muss die App auf dasselbe Netto kommen
   const check =
     Math.abs(c.calcDiff) < 0.05
@@ -496,7 +495,7 @@ function payslipCompareHTML(p) {
     <div class="card ps-table">
       <div class="ps-row ov-head"><span>Stunden</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
       ${hRows}
-      ${psRow('Gesamt', fmtH(sum(c.hours) * 60), fmtH(sum(p.hours) * 60), fmtHDiff(sumDiff), Math.abs(sumDiff) >= 0.01, 'ov-sum')}
+      ${psRow('Gesamt', fmtH(sum(c.hours) * 60), fmtH(sum(p.hours) * 60), fmtHDiff(sumDiff), 'ov-sum')}
     </div>
     <div class="card ps-table">
       <div class="ps-row ov-head"><span>Lohn</span><span class="ov-n">Zettel</span><span class="ov-n">Abrechnung</span><span class="ov-n">Unterschied</span></div>
