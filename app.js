@@ -176,6 +176,7 @@ const DEFAULT_SETTINGS = {
   church: false,
   children: '0',
   kvExtra: '',
+  otPct: '25',
   bav: '',
 };
 
@@ -260,8 +261,11 @@ const parseNum = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 const hasWage = () => parseNum(settings.wage) > 0;
-/** Überstunden werden mit 25 % Zuschlag bezahlt */
-const OT_FACTOR = 1.25;
+/** Faktor für Überstunden: 1 + Zuschlag aus den Einstellungen (leer = 25 %) */
+const otFactor = () => {
+  const v = String(settings.otPct ?? '').trim();
+  return 1 + (v === '' ? 25 : parseNum(v)) / 100;
+};
 /** Bezahlte Soll-Stunden eines Monats (Minuten): jeder Werktag Mo–Fr mit 8 Stunden, Feiertage eingeschlossen */
 function monthSollMinutes(year, month) {
   let days = 0;
@@ -280,7 +284,7 @@ function monthPay(year, month, otMin, minusMin = 0) {
   // Jede Lohnart wie auf der Abrechnung einzeln auf Cent runden (kaufmännisch, ohne Gleitkomma-Fehler)
   const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
   const base = cents(((monthSollMinutes(year, month) + Math.min(0, otMin) - minusMin) / 60) * wage);
-  const ot = cents((Math.max(0, otMin) / 60) * wage * OT_FACTOR);
+  const ot = cents((Math.max(0, otMin) / 60) * wage * otFactor());
   return nettoMonat(base + ot + parseNum(settings.bonus), lohnOpts(parseNum(settings.bav), year, month, undefined, slipTarif(year, month)));
 }
 /**
@@ -413,7 +417,7 @@ function payWithSlipHours(p) {
   const h = p.hours;
   const brutto =
     cents(h.arbeit * rate) + cents(h.urlaub * rate) + cents(h.feiertag * rate) + cents(h.krank * rate) +
-    cents((h.sonst || 0) * rate) + cents(h.ueber * rate * OT_FACTOR) + (p.zulage || 0);
+    cents((h.sonst || 0) * rate) + cents(h.ueber * rate * otFactor()) + (p.zulage || 0);
   return nettoMonat(cents(brutto), lohnOpts(p.bav || 0, p.year, p.month, p.kvZusatz, p.tarif));
 }
 
@@ -790,6 +794,7 @@ async function importPayslip(input) {
     rates: [...new Set([parseNum(settings.wage), ...known.map((x) => x.rate)].filter((v) => v > 0))],
     bav: latest ? latest.bav : parseNum(settings.bav),
     abschlag: latest ? latest.abschlag : 0,
+    otFactor: otFactor(),
   };
   // when: Monat und Jahr, falls von Hand gewählt
   const parse = (text, when = null) => {
@@ -1538,7 +1543,7 @@ function overtimeYearHTML(year, months) {
         const d = { h: HOUR_KINDS.reduce((a, [k]) => a + (slip.hours[k] || 0) - (c.hours[k] || 0), 0), e: c.netDiff || 0 };
         sum.h += d.h;
         sum.e += d.e;
-        // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen +25 % Zuschlag) orange, andere Arten grün
+        // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen des Zuschlags) orange, andere Arten grün
         const off = (k) => Math.abs(c.hourDiff[k]) >= 0.01;
         const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
         if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">${diffText(d)}</div>`;
@@ -2892,6 +2897,7 @@ function renderSettings() {
       <label class="field"><span>Kinder</span><select data-s="children">${[0, 1, 2, 3, 4, 5]
         .map((k) => `<option value="${k}" ${String(settings.children) === String(k) ? 'selected' : ''}>${k === 5 ? '5 oder mehr' : k}</option>`)
         .join('')}</select></label>
+      <label class="field"><span>Zuschlag Überstunden</span><input data-s="otPct" inputmode="decimal" placeholder="25" value="${escapeHtml(settings.otPct ?? '')}" enterkeyhint="done"><span class="unit">%</span></label>
       <label class="field"><span>Zusatzbeitrag Krankenkasse</span><input data-s="kvExtra" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.kvExtra)}" enterkeyhint="done"><span class="unit">%</span></label>
       <label class="field"><span>Betriebsrente (dein Beitrag)</span><input data-s="bav" inputmode="decimal" placeholder="0,00" value="${escapeHtml(settings.bav)}" enterkeyhint="done"><span class="unit">€</span></label>
     </div>

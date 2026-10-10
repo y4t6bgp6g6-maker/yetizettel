@@ -257,7 +257,7 @@ function parsePayslipText(text, opts = {}) {
     const hoursTok = after.match(/^\s*(\d{1,3}\s?,\s?\d{2})(?!\d)/);
     const it = {
       kind,
-      pct: kind === 'ueber' ? 1.25 : 1,
+      pct: kind === 'ueber' ? opts.otFactor || 1.25 : 1,
       hours: hoursTok ? payslipNum(hoursTok[1]) : null,
       amount: money.length > (hoursTok ? 1 : 0) ? money.at(-1) : null,
       raw: [...after.matchAll(/\d[\d.,:;']*\d/g)].map((m) => m[0]),
