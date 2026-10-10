@@ -1024,6 +1024,337 @@ function collectWorkBySite() {
   return map;
 }
 
+// ───────────────────────── Arbeitsscheine ─────────────────────────
+// Arbeitsscheine aus der Arbeitsbericht-App des Tablets (.odt): abgeholt über ein Google-Skript im eigenen Postfach
+// (Abholadresse in den Einstellungen) oder per „Sicherung einlesen“. Am Tag erscheint dann eine Kapsel; antippen zeigt
+// den Schein und trägt ihn auf Wunsch als Zeile ein.
+
+const REPORT_KEY = 'yetizettel.reports.v1';
+// items: Scheine; since: Zeitpunkt der neuesten abgeholten Mail; at: letztes Abholen
+let reportStore = { items: [], since: 0, at: 0, ...readJson(REPORT_KEY, {}) };
+const reports = () => reportStore.items;
+function saveReports() {
+  try {
+    localStorage.setItem(REPORT_KEY, JSON.stringify(reportStore));
+  } catch {
+    toast('Speichern fehlgeschlagen!');
+  }
+}
+/** Neue Scheine übernehmen, gleiche Nummer ersetzt den alten (nachträglich geänderter Schein); Rückgabe: Anzahl neue */
+function addReports(list) {
+  let n = 0;
+  for (const rep of list) {
+    const i = reportStore.items.findIndex((r) => r.id === rep.id);
+    if (i >= 0) reportStore.items[i] = rep;
+    else {
+      reportStore.items.push(rep);
+      n++;
+    }
+  }
+  saveReports();
+  return n;
+}
+const reportsOn = (date) =>
+  reports()
+    .filter((r) => r.date === isoDate(date))
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+
+/** Text einer ODT-Tabellenzelle; Zeilenumbrüche bleiben als \n */
+function odtText(node) {
+  let t = '';
+  for (const c of node.childNodes) {
+    if (c.nodeType === 3) t += c.nodeValue;
+    else if (c.nodeName === 'text:line-break') t += '\n';
+    else if (c.nodeName === 'text:s') t += ' '.repeat(Number(c.getAttribute('text:c')) || 1);
+    else if (c.nodeName === 'text:tab') t += ' ';
+    else {
+      t += odtText(c);
+      if (c.nodeName === 'text:p' || c.nodeName === 'text:h') t += '\n';
+    }
+  }
+  return t;
+}
+
+/**
+ * Arbeitsschein aus meta.xml und content.xml: Kunde/Adresse/Nummer aus den Benutzerfeldern, Datum/Zeiten/Mitarbeiter
+ * aus der Tabelle „Datum | Mitarbeiter | Arbeitsanfang | Arbeitsende | Fahrzeit | Fahrstrecke | Pause | Arbeitszeit“,
+ * Arbeiten aus der Tabelle „Arbeit“. Je Zeitzeile ein Schein (meist genau eine).
+ */
+function parseWorkReport(metaXml, contentXml) {
+  const parse = (xml) => new DOMParser().parseFromString(xml, 'application/xml');
+  const meta = parse(metaXml);
+  const field = (name) => {
+    for (const el of meta.getElementsByTagName('meta:user-defined')) if (el.getAttribute('meta:name') === name) return el.textContent.trim();
+    return '';
+  };
+  const no = field('report_id').replace(/^-/, '');
+  if (!no) throw new Error('kein Arbeitsschein');
+  const tables = [...parse(contentXml).getElementsByTagName('table:table')].map((tb) =>
+    [...tb.getElementsByTagName('table:table-row')].map((row) => [...row.getElementsByTagName('table:table-cell')].map((c) => odtText(c).trim()))
+  );
+  const table = (head) => tables.find((rows) => rows[0] && rows[0][0] === head) || [];
+  const clean = (s) => s.replace(/\s+/g, ' ').trim();
+  const time = (s) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(clean(s || ''));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const work = table('Arbeit')
+    .slice(1)
+    .map((r) => clean(r.join(' ')))
+    .filter(Boolean)
+    .join(' ');
+  const rows = table('Datum')
+    .slice(1)
+    .filter((r) => /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(clean(r[0] || '')));
+  if (!rows.length) throw new Error('keine Zeiten im Arbeitsschein');
+  const customer = clean(field('project_name') || field('bill_name'));
+  return rows.map((r, i) => {
+    const [d, m, y] = clean(r[0]).split('.').map(Number);
+    return {
+      id: rows.length > 1 ? `${no}#${i + 1}` : no,
+      no,
+      date: isoDate(new Date(y, m - 1, d)),
+      customer,
+      street: clean(field('bill_street')),
+      zip: clean(field('bill_zip')),
+      city: clean(field('bill_city')),
+      start: time(r[2]),
+      end: time(r[3]),
+      pause: time(r[6]) || 0,
+      staff: (r[1] || '').split('\n').map(clean).filter(Boolean),
+      work,
+    };
+  });
+}
+
+/** .odt-Datei (ArrayBuffer) → Scheine */
+async function readWorkReportFile(buf) {
+  const zip = readZip(buf);
+  const text = async (name) => {
+    if (!zip.has(name)) throw new Error('kein Arbeitsschein');
+    return utf8.decode(await zip.get(name)());
+  };
+  return parseWorkReport(await text('meta.xml'), await text('content.xml'));
+}
+
+/** Neue Scheine über die Abholadresse holen (höchstens alle 5 Minuten, außer „Jetzt abholen“) */
+let reportFetching = false;
+async function fetchReports(manual = false) {
+  const url = (settings.reportUrl || '').trim();
+  if (!url || reportFetching || (!manual && Date.now() - reportStore.at < 5 * 60e3)) return;
+  reportFetching = true;
+  let n = 0;
+  try {
+    const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}since=${reportStore.since || 0}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error === 'key' ? 'Schlüssel in der Abholadresse falsch' : data.error);
+    for (const f of data.files || []) {
+      try {
+        n += addReports(parseWorkReport(f.meta, f.content));
+      } catch {
+        // keine Arbeitsschein-Datei – übergehen
+      }
+      reportStore.since = Math.max(reportStore.since || 0, f.time || 0);
+    }
+    reportStore.at = Date.now();
+    saveReports();
+    if (manual) toast(n ? `${n} neue${n === 1 ? 'r' : ''} Arbeitsschein${n === 1 ? '' : 'e'}` : 'Keine neuen Arbeitsscheine');
+  } catch (e) {
+    if (manual) infoDialog('Abholen fehlgeschlagen', escapeHtml((e && e.message) || 'Keine Verbindung'));
+  } finally {
+    reportFetching = false;
+  }
+  if (currentView === 'settings') {
+    const el = document.getElementById('report-status');
+    if (el) el.textContent = reportStatusText();
+  } else if (n && currentView === 'editor' && !typingField() && !layer.classList.contains('open')) refreshAll();
+}
+const reportStatusText = () =>
+  `${reports().length} Arbeitsschein${reports().length === 1 ? '' : 'e'}${
+    reportStore.at ? ` · abgeholt ${fmtDayMonth(new Date(reportStore.at))} ${fmtTime(new Date(reportStore.at).getHours() * 60 + new Date(reportStore.at).getMinutes())}` : ''
+  }`;
+
+// Rechtsformen und Allerweltswörter zählen beim Wiedererkennen eines Kunden nicht
+const LEGAL_FORMS = new Set(['gmbh', 'mbh', 'se', 'ag', 'kg', 'ohg', 'ug', 'co', 'co.', '&', '+', 'e.k.', 'e.v.', 'gbr', '(haftungsbeschränkt)']);
+const GENERIC_WORDS = new Set(['bäckerei', 'fleischerei', 'metzgerei', 'restaurant', 'hotel', 'café', 'cafe', 'eiscafé', 'kaffee', 'gaststätte', 'pizzeria', 'imbiss', 'markt', 'supermarkt', 'praxis', 'firma', 'autohaus', 'industries', 'gruppe']);
+
+/** Kunde ohne Rechtsform: „Muster Kälte GmbH & Co. KG“ → „Muster Kälte“ */
+const shortCustomer = (name) =>
+  String(name || '')
+    .split(/\s+/)
+    .filter((w) => w && !LEGAL_FORMS.has(w.toLowerCase()))
+    .join(' ')
+    .replace(/[,&+\s]+$/, '');
+const customerWords = (name) =>
+  (sameKey(shortCustomer(name)).match(/[a-zäöüß0-9]{4,}/g) || []).filter((w) => !GENERIC_WORDS.has(w));
+
+/** Schon im Tag eingetragen: Zeile aus diesem Schein oder mit dem Kunden in der Baustelle */
+function reportEntered(day, rep) {
+  const words = customerWords(rep.customer);
+  return day.rows.some((r) => r.report === rep.id || words.some((w) => sameKey(r.site).includes(w)));
+}
+
+/** Baustelle: eigene frühere Schreibweise des Kunden, sonst „Kunde, Ort“ */
+function reportSite(rep) {
+  const short = shortCustomer(rep.customer);
+  const words = customerWords(rep.customer);
+  const known = collectSuggestions('site').find((site) => {
+    const k = sameKey(site);
+    return k.includes(sameKey(short)) || words.includes(k.split(/[\s,]+/)[0]);
+  });
+  return (known || [short, rep.city].filter(Boolean).join(', ')).slice(0, MAX_LEN.site);
+}
+
+/** Art der Arbeit: eigene frühere Einträge mit Wörtern aus dem Schein, dazu der erste Satz des Scheins */
+function reportWorkOptions(rep, site) {
+  const stem = (w) => w.slice(0, 6);
+  const text = sameKey(rep.work);
+  const words = new Set((text.match(/[a-zäöüß]{4,}/g) || []).map(stem));
+  const fault = /fehler|alarm|störung|defekt|ausgefallen|zeigt .* an/.test(text);
+  const atSite = collectWorkBySite().get(sameKey(site));
+  const scored = collectSuggestions('work')
+    .map((w, i) => {
+      const own = sameKey(w).match(/[a-zäöüß]{4,}/g) || [];
+      const hits = own.filter((x) => words.has(stem(x))).length;
+      if (!hits) return null;
+      const bonus = (atSite && atSite.get(sameKey(w)) ? 3 : 0) + (fault && /störung/.test(sameKey(w)) ? 5 : 0);
+      return { w, score: hits * 10 + bonus - i * 0.01 };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.w);
+  const first = (rep.work.split(/(?<=[.!?])\s/)[0] || '').trim().replace(/\.$/, '').slice(0, MAX_LEN.work);
+  return [...new Set([...scored.slice(0, 2), first].filter(Boolean))];
+}
+
+/** Kapsel neben dem Wochentag: blau, solange ein Schein fehlt; grau mit Haken, wenn alle eingetragen sind */
+function reportChipHTML(s, i) {
+  const day = s.days[i];
+  if (day.status && day.status !== 'feiertag') return '';
+  const list = reportsOn(sheetDate(s, i));
+  if (!list.length) return '';
+  const done = list.every((rep) => reportEntered(day, rep));
+  return `<button class="ws-chip ${done ? 'done' : ''}" data-act="report" aria-label="Arbeitsschein">${ICON.doc}${done ? ICON.check : ''}</button>`;
+}
+
+/** Kapsel angetippt: ein Schein → gleich das Fenster, mehrere → erst auswählen */
+function pickReport(el) {
+  const { s, dayIndex, day } = rowContext(el);
+  const list = reportsOn(sheetDate(s, dayIndex));
+  if (list.length === 1) return openReport(list[0].id);
+  actionSheet(
+    list.map((rep) => ({
+      label: `${reportEntered(day, rep) ? '✓ ' : ''}${escapeHtml(shortCustomer(rep.customer))} · ${fmtTime(rep.start)}–${fmtTime(rep.end)}`,
+      run: () => setTimeout(() => openReport(rep.id), 280),
+    }))
+  );
+}
+
+/** Fenster mit dem Schein; draft = was eingetragen wird (bleibt beim Wechsel zum Uhrzeit-Rad erhalten) */
+function openReport(id, draft = null) {
+  const rep = reports().find((r) => r.id === id);
+  const s = currentSheet();
+  const dayIndex = [0, 1, 2, 3, 4, 5, 6].find((i) => isoDate(sheetDate(s, i)) === rep.date);
+  const day = s.days[dayIndex];
+  if (!draft) {
+    const site = reportSite(rep);
+    draft = { start: rep.start, end: rep.end, site, work: reportWorkOptions(rep, site)[0] || '' };
+  }
+  const options = reportWorkOptions(rep, draft.site);
+  const done = reportEntered(day, rep);
+  const me = sameKey(settings.name);
+  const others = (rep.staff || []).filter((n) => sameKey(n) !== me);
+  const fact = (label, value) => (value ? `<div class="ws-fact"><span>${label}</span><b>${value}</b></div>` : '');
+  const time = (which, label) =>
+    `<button class="time ${draft[which] == null ? 'empty' : ''}" data-w="${which}">${draft[which] == null ? label : fmtTime(draft[which])}</button>`;
+  const onSite = rep.start != null && rep.end != null ? rep.end - rep.start - (rep.pause || 0) : null;
+  const modal = openModal(
+    `<div class="modal-head">
+      <button class="modal-btn" data-m="cancel">Schließen</button>
+      <b>Arbeitsschein</b>
+      <span></span>
+    </div>
+    <div class="ws-body">
+      <div class="ws-card">
+        <div class="ws-cust">${escapeHtml(rep.customer)}</div>
+        <div class="ws-addr">${escapeHtml([rep.street, [rep.zip, rep.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</div>
+        <div class="ws-facts">
+          ${rep.start != null ? fact('Vor Ort', `${fmtTime(rep.start)} – ${rep.end != null ? fmtTime(rep.end) : '?'}${onSite != null ? ` · ${fmtH(onSite)}` : ''}`) : ''}
+          ${fact('Pause', rep.pause ? fmtH(rep.pause) : '')}
+          ${fact('Mit', escapeHtml(others.join(', ')))}
+        </div>
+        <div class="ws-label">Durchgeführte Arbeiten</div>
+        <div class="ws-text">${escapeHtml(rep.work) || '–'}</div>
+        <div class="ws-no">Nr. ${escapeHtml(rep.no)}</div>
+      </div>
+      <div class="ws-label sec">${done ? `<span class="ws-done">${ICON.check} Schon eingetragen</span>` : 'Eintragen als'}</div>
+      <div class="ws-form">
+        <div class="row-times">${time('start', 'Beginn')}<span class="arrow">–</span>${time('end', 'Ende')}</div>
+        <div class="ws-field"><span class="ws-icon">${ICON.pin}</span><textarea class="ws-in" data-f="site" rows="1" maxlength="${MAX_LEN.site}" placeholder="Ort" autocapitalize="sentences">${escapeHtml(draft.site)}</textarea></div>
+        <div class="ws-field"><span class="ws-icon">${ICON.tool}</span><textarea class="ws-in" data-f="work" rows="1" maxlength="${MAX_LEN.work}" placeholder="Arbeit" autocapitalize="sentences">${escapeHtml(draft.work)}</textarea></div>
+        ${
+          options.length > 1
+            ? `<div class="ws-opts">${options
+                .map((o) => `<button class="ws-opt ${o === draft.work ? 'sel' : ''}" data-o="${escapeHtml(o)}">${escapeHtml(o)}</button>`)
+                .join('')}</div>`
+            : ''
+        }
+      </div>
+    </div>
+    <div class="ws-go-wrap"><button class="ws-go" data-m="ok">${done ? 'Trotzdem eintragen' : 'Eintragen'}</button></div>`,
+    'sheet ws-sheet'
+  );
+  const read = () => {
+    for (const el of modal.querySelectorAll('.ws-in')) draft[el.dataset.f] = el.value.replace(/\s*\n\s*/g, ' ');
+  };
+  const fit = () => modal.querySelectorAll('.ws-in').forEach(fitTextarea);
+  fit();
+  requestAnimationFrame(fit);
+  modal.addEventListener('input', fit);
+  modal.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-m],[data-w],[data-o]');
+    if (!t) return;
+    read();
+    if (t.dataset.o != null) {
+      draft.work = t.dataset.o;
+      modal.querySelector('[data-f="work"]').value = draft.work;
+      modal.querySelectorAll('.ws-opt').forEach((b) => b.classList.toggle('sel', b === t));
+      fit();
+    } else if (t.dataset.w) {
+      const which = t.dataset.w;
+      const reopen = () => setTimeout(() => openReport(id, draft), 280);
+      timePicker(
+        which === 'start' ? 'Beginn' : 'Ende',
+        draft[which] ?? (which === 'start' ? 8 * 60 : 17 * 60),
+        draft[which] != null,
+        (v) => {
+          draft[which] = v;
+          reopen();
+        },
+        reopen
+      );
+    } else if (t.dataset.m === 'ok') {
+      closeModal();
+      enterReport(rep, s, dayIndex, draft);
+    } else closeModal();
+  });
+}
+
+/** Als Zeile eintragen: leere Zeile ersetzen, nach Beginn einsortieren */
+function enterReport(rep, s, dayIndex, draft) {
+  const day = s.days[dayIndex];
+  const row = { ...emptyRow(), start: draft.start, end: draft.end, site: draft.site.trim(), work: draft.work.trim(), report: rep.id };
+  const empty = day.rows.findIndex(rowIsEmpty);
+  if (empty >= 0) day.rows.splice(empty, 1);
+  let at = draft.start == null ? -1 : day.rows.findIndex((r) => r.start != null && r.start > draft.start);
+  if (at < 0) at = day.rows.length;
+  day.rows.splice(at, 0, row);
+  expandedDays.add(`${s.id}:${dayIndex}`);
+  saveSheets(s);
+  refreshDay(dayIndex);
+  toast('Eingetragen');
+}
+
 // ───────────────────────── Icons ─────────────────────────
 
 const svg = (path, size = 22) =>
@@ -1050,6 +1381,7 @@ const ICON = {
   krank: svg('<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/>', 14),
   feiertag: svg('<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>', 14),
   frei: svg('<path d="M4 9h12v4a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M16 10h1.5a2 2 0 0 1 0 4H16M8 4v2M12 4v2"/>', 14),
+  doc: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>', 15),
   tool: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.4 1.4 0 0 0 2 2l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.4 2.4-2-2z"/>', 15),
 };
 
@@ -1095,6 +1427,7 @@ function route() {
   } else if (m) {
     currentView = 'editor';
     renderEditor(decodeURIComponent(m[1]));
+    fetchReports();
     syncNav();
     window.scrollTo(0, 0);
   } else if (hash === '#/einstellungen') {
@@ -1697,7 +2030,7 @@ function dayHTML(s, i) {
   const day = s.days[i];
   const date = sheetDate(s, i);
   const head = `<div class="day-head">
-      <div><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span></div>
+      <div class="day-when"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span>${reportChipHTML(s, i)}</div>
       <div class="day-actions">
         <button class="chip-btn status-btn ${day.status ? 'set status-' + day.status : ''}" data-act="status">${day.status ? DAY_STATUS_SHORT[day.status] : 'Arbeit'} ▾</button>
       </div>
@@ -2919,13 +3252,20 @@ function renderSettings() {
     </div>
     <p class="footnote">Steht unten auf der Reisekostenabrechnung.</p>
 
+    <h2 class="section-title">Arbeitsscheine</h2>
+    <div class="card form">
+      <label class="field"><span>Abholadresse</span><input data-s="reportUrl" placeholder="Link einfügen" value="${escapeHtml(settings.reportUrl || '')}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
+      <button class="list-btn" data-act="reports-fetch">Jetzt abholen</button>
+    </div>
+    <p class="footnote" id="report-status">${reportStatusText()}</p>
+
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
       <label class="list-btn">Sicherung einlesen …<input type="file" multiple accept="${IMPORT_ACCEPT}" data-act-change="backup-import" hidden></label>
     </div>
     <p class="footnote">Deine Daten sind nur auf diesem iPhone – sichere sie ab und zu.</p>
-    <p class="footnote">Einlesen geht auch mit Numbers- oder PDF-Zetteln.</p>
+    <p class="footnote">Einlesen geht auch mit Numbers- oder PDF-Zetteln und Arbeitsscheinen.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
 }
 
@@ -2946,7 +3286,7 @@ function hiddenSuggestionsHTML() {
 }
 
 function exportBackup() {
-  const data = JSON.stringify({ app: 'stundenzettel', version: 1, exportedAt: new Date().toISOString(), sheets, trips, settings, payslips }, null, 2);
+  const data = JSON.stringify({ app: 'stundenzettel', version: 1, exportedAt: new Date().toISOString(), sheets, trips, settings, payslips, reports: reports() }, null, 2);
   const file = new File([data], `Yetizettel-Sicherung ${isoDate(new Date())}.json`, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file] }).catch((e) => {
@@ -3124,13 +3464,15 @@ function mergeBackup(data) {
     }
     if (n) savePayslips();
   }
+  // Arbeitsscheine: fehlende übernehmen
+  if (Array.isArray(data.reports)) addReports(data.reports.filter((r) => r && r.id && r.date && !reports().some((x) => x.id === r.id)));
   return { added, same, conflicts, signature, renamed, tripsAdded, tripsSame, settingsRestored };
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
 /** Dateitypen für „Einlesen“ (nur diese, damit iOS keine Kamera/Fotos anbietet) */
 const IMPORT_ACCEPT =
-  '.json,.numbers,.pdf,application/json,application/pdf,application/vnd.apple.numbers,application/x-iwork-numbers-sffnumbers';
+  '.json,.numbers,.pdf,.odt,application/json,application/pdf,application/vnd.apple.numbers,application/x-iwork-numbers-sffnumbers,application/vnd.oasis.opendocument.text';
 
 /** Dateiauswahl zum Einlesen öffnen – muss direkt im Antippen laufen, sonst blockiert Safari sie */
 function pickImportFile() {
@@ -3155,6 +3497,7 @@ async function importBackup(input) {
   const conflicts = [];
   let total = 0;
   let tripCount = 0;
+  let reportCount = 0;
   // Herkunft der in diesem Durchgang neu eingelesenen Zettel/Abrechnungen (Rückfrage zeigt dann „aus Datei …“)
   const origin = new Map();
   const added = new Map(); // erst durch dieses Einlesen angelegt → { file, stamp, stampLabel }
@@ -3196,6 +3539,14 @@ async function importBackup(input) {
         if (r.signature) parts.push('Unterschrift übernommen');
         if (r.renamed) parts.push(`Name bei ${r.renamed} auf „${escapeHtml(settings.name.trim())}“ geändert`);
         lines.push(`${label}: ${parts.join(', ')}`);
+        continue;
+      }
+      // Arbeitsschein (.odt der Arbeitsbericht-App)
+      if (/\.odt$/i.test(file.name)) {
+        const list = await readWorkReportFile(buf);
+        const n = addReports(list);
+        reportCount += n;
+        lines.push(`${label}: Arbeitsschein ${escapeHtml(shortCustomer(list[0].customer))}, ${fmtShort(parseDate(list[0].date))}${n ? '' : ' (schon vorhanden)'}`);
         continue;
       }
       // Woche über ein Monatsende: ein Zettel je Monat
@@ -3301,7 +3652,7 @@ async function importBackup(input) {
   if (currentView === 'settings') renderSettings();
   if (currentView === 'list') renderList();
   if (currentView === 'trips') renderTripList();
-  const done = [total ? `${total} Stundenzettel` : '', tripCount ? `${tripCount} Reisekostenabrechnung${tripCount === 1 ? '' : 'en'}` : ''].filter(Boolean);
+  const done = [total ? `${total} Stundenzettel` : '', tripCount ? `${tripCount} Reisekostenabrechnung${tripCount === 1 ? '' : 'en'}` : '', reportCount ? `${reportCount} Arbeitsschein${reportCount === 1 ? '' : 'e'}` : ''].filter(Boolean);
   infoDialog(done.length ? `${done.join(' und ')} eingelesen` : 'Nichts eingelesen', `<ul class="problem-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
 }
 
@@ -3532,7 +3883,7 @@ function modalHead(title, okLabel = 'Fertig') {
 }
 
 /** Scroll-Räder wie bei iOS. columns: [{ values, label }], initial: Werte je Spalte */
-function wheelPicker(title, columns, initial, onDone, extraHTML = '', onExtra = null) {
+function wheelPicker(title, columns, initial, onDone, extraHTML = '', onExtra = null, onCancel = null) {
   const ITEM = 40;
   const modal = openModal(
     `${modalHead(title)}
@@ -3550,6 +3901,7 @@ function wheelPicker(title, columns, initial, onDone, extraHTML = '', onExtra = 
     ${extraHTML}`,
     'sheet'
   );
+  if (onCancel) layer.querySelector('.backdrop').addEventListener('click', onCancel);
   const lists = [...modal.querySelectorAll('.wheel-list')];
   const indexOf = (list) => Math.max(0, Math.min(list.children.length - 1, Math.round(list.scrollTop / ITEM)));
   const mark = (list) => {
@@ -3584,6 +3936,7 @@ function wheelPicker(title, columns, initial, onDone, extraHTML = '', onExtra = 
       onDone(vals);
     } else if (b.dataset.m === 'cancel') {
       closeModal();
+      if (onCancel) onCancel();
     } else if (b.dataset.m === 'extra' && onExtra) {
       closeModal();
       onExtra();
@@ -3591,7 +3944,7 @@ function wheelPicker(title, columns, initial, onDone, extraHTML = '', onExtra = 
   });
 }
 
-function timePicker(title, initial, hasValue, onDone) {
+function timePicker(title, initial, hasValue, onDone, onCancel = null) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const step = settings.minuteStep;
   const minutes = Array.from({ length: 60 / step }, (_, i) => i * step);
@@ -3604,7 +3957,8 @@ function timePicker(title, initial, hasValue, onDone) {
     [Math.floor(initial / 60), Math.floor((initial % 60) / step) * step],
     ([h, m]) => onDone(h * 60 + m),
     hasValue ? `<button class="modal-wide destructive" data-m="extra">Zeit löschen</button>` : '',
-    () => onDone(null)
+    () => onDone(null),
+    onCancel
   );
 }
 
@@ -4325,6 +4679,12 @@ document.addEventListener('click', (e) => {
     case 'status':
       chooseStatus(el);
       break;
+    case 'report':
+      pickReport(el);
+      break;
+    case 'reports-fetch':
+      fetchReports(true);
+      break;
     case 'addrow': {
       const { s, dayIndex, day } = rowContext(el);
       // Neue Zeile beginnt dort, wo die vorherige geendet hat
@@ -4765,6 +5125,8 @@ document.addEventListener('contextmenu', (e) => {
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 history.replaceState('root', '', location.hash || '#/');
 route();
+fetchReports();
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && fetchReports());
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
