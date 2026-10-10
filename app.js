@@ -1520,14 +1520,18 @@ function overtimeYearHTML(year, months) {
   /** „3“, „3,5“, „10,25“ Stunden */
   const hrs = (h) => fmtDec(Math.abs(h) * 60).replace(/,00$/, '').replace(/(,\d)0$/, '$1');
   const ok = (d) => Math.abs(d.h) < 0.01 && Math.abs(d.e) < 0.5;
-  /** „3 Std. weniger · 39 € Netto weniger“ – Abrechnung gegenüber den Zetteln */
-  const diffText = (d) =>
-    [
-      Math.abs(d.h) >= 0.01 ? `${hrs(d.h)} Std. ${d.h < 0 ? 'weniger' : 'mehr'}` : '',
-      withPay && Math.abs(d.e) >= 0.5 ? `${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ');
+  /**
+   * „zu wenig 3 Std. · 39 € Netto“ bzw. „zu viel …“ – Abrechnung gegenüber den Zetteln; gehen Stunden und Netto in
+   * verschiedene Richtungen: „zu wenig 3 Std. · zu viel 39 € Netto“
+   */
+  const diffText = (d) => {
+    const h = Math.abs(d.h) >= 0.01 ? { neg: d.h < 0, t: `${hrs(d.h)} Std.` } : null;
+    const e = withPay && Math.abs(d.e) >= 0.5 ? { neg: d.e < 0, t: `${fmtMoney(Math.abs(d.e))} Netto` } : null;
+    const word = (x) => (x.neg ? 'zu wenig' : 'zu viel');
+    if (h && e) return h.neg === e.neg ? `${word(h)} ${h.t} · ${e.t}` : `${word(h)} ${h.t} · ${word(e)} ${e.t}`;
+    const x = h || e;
+    return x ? `${word(x)} ${x.t}` : '';
+  };
   const sum = { h: 0, e: 0 };
   const rows = keys
     .map((m) => {
@@ -1542,7 +1546,7 @@ function overtimeYearHTML(year, months) {
         sum.e += d.e;
         // Gesamtstunden gleich, aber anders verbucht: Überstunden (wegen des Zuschlags) orange, andere Arten grün
         const off = (k) => Math.abs(c.hourDiff[k]) >= 0.01;
-        const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${fmtMoney(Math.abs(d.e))} Netto ${d.e < 0 ? 'weniger' : 'mehr'}` : '';
+        const euro = withPay && Math.abs(d.e) >= 0.5 ? ` · ${d.e < 0 ? 'zu wenig' : 'zu viel'} ${fmtMoney(Math.abs(d.e))} Netto` : '';
         if (Math.abs(d.h) >= 0.01) line = `<div class="ov-verdict ${d.h < 0 || d.e < 0 ? 'neg' : 'ok'}">${diffText(d)}</div>`;
         else if (off('ueber')) line = `<div class="ov-verdict neg">Überstunden falsch verbucht${euro}</div>`;
         else if (HOUR_KINDS.some(([k]) => off(k)) || !ok(d))
