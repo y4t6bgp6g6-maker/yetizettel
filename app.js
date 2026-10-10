@@ -1214,7 +1214,7 @@ function statsCardHTML() {
   const pay = monthPay(year, month, (overtimeAccount().get(year) || new Map()).get(month) || 0);
   return `<a draggable="false" class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
-    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
+    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">Urlaub genommen</span></span>
     <span class="stats-item">${
       pay
         ? `<span class="stats-num">${fmtMoney(pay.netto)}</span><span class="stats-label">Netto ${MONTHS[month - 1]} (Prognose)</span>`
@@ -1292,7 +1292,7 @@ function renderStats() {
       <div class="ov-tile">
         <span class="ov-icon vac">${OV_ICON.sun}</span>
         <span class="ov-num">${fmtNum(st.urlaub)}</span>
-        <span class="ov-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span>
+        <span class="ov-label">Urlaub genommen</span>
       </div>
       <div class="ov-tile">
         <span class="ov-icon sick">${OV_ICON.cross}</span>
