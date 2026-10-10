@@ -240,6 +240,7 @@ function parsePayslipText(text, opts = {}) {
   // Lohnarten
   const items = [];
   let zulage = null;
+  let zulageLine = false; // Zeile mit Zulage/Prämie vorhanden (auch wenn ihr Betrag unlesbar ist)
   let bavDeduct = null;
   for (const line of lines) {
     const code = line.match(/^\W{0,4}(?:\d\s)?(\d{3})\s/);
@@ -247,6 +248,7 @@ function parsePayslipText(text, opts = {}) {
     const kind = payslipLineKind(line);
     if (!kind) continue;
     if (kind === 'zulage') {
+      zulageLine = true;
       if ((zulage == null || code) && !/\d,\d{2}\s?-\s*$/.test(line) && lastMoney(line) != null) zulage = lastMoney(line);
       continue;
     }
@@ -342,12 +344,15 @@ function parsePayslipText(text, opts = {}) {
     if (score > bScore) [brutto, bScore] = [v, score];
   }
   r.brutto = brutto;
-  // Genau eine Lohnart unlesbar: ihr Betrag ist der Rest bis zum (bestätigten) Gesamt-Brutto
-  if (brutto != null && open.length === 1 && zulage != null && r.rate && bScore >= 3) {
+  // Genau eine Lohnart unlesbar: ihr Betrag ist der Rest bis zum (bestätigten) Gesamt-Brutto. Ohne jede Zulagen-Zeile
+  // gilt die Zulage als 0 – sonst würde der Rest still zur „Zulage“ statt zu den Stunden der unlesbaren Zeile
+  const knownZulage = zulage ?? (zulageLine ? null : 0);
+  if (brutto != null && open.length === 1 && knownZulage != null && r.rate && bScore >= 3) {
     const it = open[0];
-    const amount = psR2(brutto - sumLines - zulage);
+    const amount = psR2(brutto - sumLines - knownZulage);
     const hours = amount / (r.rate * it.pct);
-    if (quarter(hours)) {
+    if (amount > 0 && quarter(hours)) {
+      zulage = knownZulage;
       r.hours[it.kind] += Math.round(hours * 4) / 4;
       r.pay[it.kind] = psR2(r.pay[it.kind] + amount);
       sumLines = psR2(sumLines + amount);
